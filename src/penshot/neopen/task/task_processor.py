@@ -279,11 +279,11 @@ class AsyncTaskProcessor:
 
         try:
             # 更新状态为处理中
-            self.task_manager.update_task_progress(task_id, "processing", 10)
             self.task_manager.update_task_progress_detail(task_id, TaskStage.INIT, 0)
 
             # 获取工作流实例
             workflow = self.task_manager.get_workflow(self.task_manager, task["script_id"], task_id, config)
+            self.task_manager.update_task_progress_detail(task_id, TaskStage.PROCESSING, 10)
 
             # 执行处理 - 工作流内部会更新详细进度
             self.task_manager.update_task_progress_detail(task_id, TaskStage.PARSING_START, 0)

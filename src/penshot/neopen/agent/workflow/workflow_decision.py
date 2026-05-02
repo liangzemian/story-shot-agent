@@ -11,7 +11,7 @@ from typing import Tuple, Any
 from langgraph.graph import END
 
 from penshot.neopen.agent.human_decision.human_decision_converter import HumanDecisionConverter
-from penshot.neopen.agent.quality_auditor.quality_auditor_models import AuditStatus
+from penshot.neopen.agent.quality_auditor.quality_auditor_models import AuditStatus, SeverityLevel
 from penshot.neopen.agent.workflow.workflow_models import PipelineState, PipelineNode, AgentStage
 from penshot.neopen.agent.workflow.workflow_state_types import WorkflowState
 from penshot.logger import error, warning, info
@@ -418,6 +418,27 @@ class PipelineDecision:
             else:
                 info(f"发现{issue_count}个轻微问题，建议修复")
                 return PipelineState.NEEDS_REPAIR
+
+        elif report.status in [AuditStatus.MODERATE_ISSUES, AuditStatus.MAJOR_ISSUES]:
+            # 获取问题摘要
+            violations = report.violations
+            error_count = sum(1 for v in violations if v.severity in [SeverityLevel.ERROR, SeverityLevel.CRITICAL])
+            warning_count = sum(1 for v in violations if v.severity == SeverityLevel.WARNING)
+
+            # 分类问题
+            critical_types = [v.rule_name for v in violations if v.severity in [SeverityLevel.ERROR, SeverityLevel.CRITICAL]]
+            critical_summary = ", ".join(critical_types[:3])
+
+            if error_count > 0:
+                warning(
+                    f"质量审查发现 {error_count} 个错误、{warning_count} 个警告，需要修复。"
+                    f"主要问题: {critical_summary}"
+                )
+            else:
+                info(
+                    f"质量审查发现 {warning_count} 个警告，可以继续但建议关注。"
+                    f"问题类型: {critical_summary}"
+                )
 
         # 审计状态到决策状态的映射
         decision_map = {

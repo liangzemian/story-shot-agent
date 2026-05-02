@@ -17,6 +17,7 @@ from penshot.neopen.agent.continuity_guardian.continuity_repair_generator import
 from penshot.neopen.agent.human_decision.human_decision_intervention import HumanIntervention
 from penshot.neopen.agent.quality_auditor.quality_auditor_models import AuditStatus, QualityAuditReport, SeverityLevel, QualityRepairParams
 from penshot.neopen.agent.workflow.workflow_error_handler import WorkflowErrorHandler, ErrorHandlerMiddleware
+from penshot.neopen.agent.workflow.workflow_logger import warn_once
 from penshot.neopen.agent.workflow.workflow_models import AgentStage, PipelineNode
 from penshot.neopen.agent.workflow.workflow_output import WorkflowOutputWriter
 from penshot.neopen.agent.workflow.workflow_state_types import WorkflowState
@@ -98,6 +99,9 @@ class WorkflowNodes:
         # 初始化统一错误处理器
         self.error_handler = WorkflowErrorHandler()
         self.error_middleware = ErrorHandlerMiddleware(self.error_handler)
+
+        self._enhanced_warning_issued = False  # 增强模式警告标记
+        self._quality_warning_issued = False  # 质量警告标记
 
     def parse_script_node(self, state: WorkflowState) -> WorkflowState:
         """
@@ -725,6 +729,35 @@ class WorkflowNodes:
         - 生成增强的修复参数
         - 自动调用各阶段修复器
         """
+        # 检查是否短时间内重复执行
+        if state.domain.audit_executed and state.domain.audit_timestamp:
+            last_time = datetime.fromisoformat(state.domain.audit_timestamp)
+            current_time = datetime.now()
+            time_diff = (current_time - last_time).total_seconds()
+
+            # 检查是否有新的修复参数
+            has_new_repair = bool(state.domain.repair_params)
+
+            if time_diff < 10 and not has_new_repair:
+                # 这是正常的重复调用（例如来自修复流程），降级为 DEBUG
+                info(
+                    f"质量审查在 {time_diff:.1f} 秒内重复调用，"
+                    f"使用上次结果 (修复参数: {has_new_repair})"
+                )
+                return state
+            elif time_diff < 10:
+                # 有新的修复参数，说明这是修复后的重新审查
+                info(f"质量审查重新执行 (有新的修复参数: {list(state.domain.repair_params.keys())})")
+                last_result = self.memory.get_latest_deserialized("latest_audit_result", MemoryLevel.SHORT_TERM)
+                if last_result:
+                    report_data = last_result.get("report")
+                    if report_data:
+                        state.domain.audit_report = QualityAuditReport(**report_data)
+                        return state
+
+        info(f"进入质量审查节点（增强版），当前阶段={state.execution.current_stage.value}")
+        info(f"审查前状态: 片段数={len(state.domain.fragment_sequence.fragments) if state.domain.fragment_sequence else 0}")
+
         # 更新状态：开始审查
         self._update_task_progress(state.input.task_id, TaskStage.AUDIT_START, 0)
 
@@ -746,25 +779,8 @@ class WorkflowNodes:
             "successful_repair_patterns": successful_repair_patterns
         }
 
-        # 检查是否短时间内重复执行
-        if state.domain.audit_executed and state.domain.audit_timestamp:
-            last_time = datetime.fromisoformat(state.domain.audit_timestamp)
-            current_time = datetime.now()
-            time_diff = (current_time - last_time).total_seconds()
-
-            if time_diff < 10:
-                last_result = self.memory.get_latest_deserialized("latest_audit_result", MemoryLevel.SHORT_TERM)
-                if last_result:
-                    report_data = last_result.get("report")
-                    if report_data:
-                        state.domain.audit_report = QualityAuditReport(**report_data)
-                        return state
-
-        info(f"进入质量审查节点（增强版），当前阶段={state.execution.current_stage.value}")
-        info(f"审查前状态: 片段数={len(state.domain.fragment_sequence.fragments) if state.domain.fragment_sequence else 0}")
-
         # 更新状态：审查中
-        self._update_task_progress(state.input.task_id, TaskStage.AUDITING, 50)
+        self._update_task_progress(state.input.task_id, TaskStage.AUDITING, 20)
 
         try:
             # 执行质量审查（传入各阶段问题和历史上下文）
@@ -1812,3 +1828,16 @@ class WorkflowNodes:
         except Exception as e:
             warning(f"记录阶段失败: {e}")
             print_log_exception()
+
+    def _apply_historical_context_if_needed(self, node_name: str,
+                                            historical_context: Dict):
+        # 优化：只在第一次和分数显著变化时警告
+        historical_stats = historical_context.get('historical_stats', {})
+        quality_score = historical_stats.get('completeness_score', 0)
+
+        if quality_score < 0.6:
+            # 使用聚合器，避免重复警告
+            warn_once(
+                f"low_quality_{node_name}",
+                f"{node_name}: 历史质量较低 (分数: {quality_score:.2f})，启用增强验证模式"
+            )

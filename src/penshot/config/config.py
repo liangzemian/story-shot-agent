@@ -141,8 +141,7 @@ class Settings(BaseSettings):
 
 # ==================== 全局配置实例 ====================
 settings = Settings()
-app_config = settings.get_app_config()
-os.environ["HF_ENDPOINT"] = app_config.hf_endpoint
+os.environ["HF_ENDPOINT"] = settings.get_app_config().hf_endpoint
 
 # ==================== 调试辅助 ====================
 

@@ -549,7 +549,6 @@ class ScriptKnowledgeBase:
             error(f"添加文档到索引失败: {str(e)}")
             raise
 
-    # llama_index_knowledge.py - 修改 _load_storage 方法
 
     def _load_storage(self):
         """加载存储的索引和解析结果"""

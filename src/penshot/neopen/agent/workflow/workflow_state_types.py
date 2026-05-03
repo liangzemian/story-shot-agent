@@ -110,8 +110,8 @@ class ExecutionState(BaseModel):
     # 节点循环控制
     node_max_loops: Dict[PipelineNode, int] = {
         PipelineNode.PARSE_SCRIPT: 3,
-        PipelineNode.SEGMENT_SHOT: 5,
-        PipelineNode.SPLIT_VIDEO: 5,
+        PipelineNode.SEGMENT_SHOT: 3,
+        PipelineNode.SPLIT_VIDEO: 3,
         PipelineNode.CONVERT_PROMPT: 3,
         PipelineNode.AUDIT_QUALITY: 3,
         PipelineNode.CONTINUITY_CHECK: 3,

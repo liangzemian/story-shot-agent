@@ -453,6 +453,13 @@ class WorkflowNodes:
                 parsed_script=state.domain.parsed_script,
             )
 
+            # 自动调整超长片段（软限制）
+            max_duration = state.config.max_fragment_duration
+            for fragment in fragment_sequence.fragments:
+                if fragment.duration > max_duration:
+                    fragment.duration = max_duration
+                    info("已自动调整超长片段时长")
+
             # 更新状态：分段完成
             self._update_task_progress(state.input.task_id, TaskStage.SPLIT_COMPLETE, 100)
             self._complete_stage(state.input.task_id, TaskStage.SPLIT_COMPLETE, {

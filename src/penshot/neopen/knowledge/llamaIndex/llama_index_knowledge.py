@@ -282,8 +282,8 @@ class ScriptKnowledgeBase:
             error(f"添加剧本目录失败: {str(e)}")
             raise
 
-    def create_retriever(self, search_type: str = "similarity", similarity_top_k: int = 5,
-                         use_rerank: bool = False, rerank_model: str = "BAAI/bge-reranker-large") -> BaseRetriever:
+    def create_retriever(self, search_type: str = None, similarity_top_k: int = None,
+                         use_rerank: bool = None, rerank_model: str = None) -> BaseRetriever:
         """
         创建检索器
         
@@ -297,10 +297,15 @@ class ScriptKnowledgeBase:
             检索器实例
         """
         try:
+            retriever_config = settings.get_retriever_config()
+            search_type = search_type or retriever_config.search_type
+            similarity_top_k = similarity_top_k or retriever_config.similarity_top_k
+            use_rerank = use_rerank if use_rerank is not None else retriever_config.rerank_enabled
+            rerank_model = rerank_model or retriever_config.rerank_model_name
+
             if not self.index:
                 raise ValueError("索引未创建，请先添加剧本")
 
-            # 创建基础检索器
             if search_type == "mmr":
                 retriever = self.index.as_retriever(
                     retriever_mode="mmr",
@@ -313,10 +318,14 @@ class ScriptKnowledgeBase:
                     similarity_top_k=similarity_top_k
                 )
 
-            # 添加重排序
             if use_rerank:
+                if retriever_config.rerank_model_local_path and os.path.exists(retriever_config.rerank_model_local_path):
+                    model_to_use = retriever_config.rerank_model_local_path
+                else:
+                    model_to_use = rerank_model
+
                 rerank = SentenceTransformerRerank(
-                    model=rerank_model,
+                    model=model_to_use,
                     top_n=min(3, similarity_top_k)
                 )
                 retriever = self.index.as_retriever(
@@ -540,7 +549,6 @@ class ScriptKnowledgeBase:
             error(f"添加文档到索引失败: {str(e)}")
             raise
 
-    # llama_index_knowledge.py - 修改 _load_storage 方法
 
     def _load_storage(self):
         """加载存储的索引和解析结果"""
@@ -552,6 +560,7 @@ class ScriptKnowledgeBase:
                     # 检查文件是否为空或无效
                     if os.path.getsize(vector_store_path) > 0:
                         self.vector_store = SimpleVectorStore.from_persist_path(vector_store_path)
+                        
                         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
                         self.index = VectorStoreIndex.from_vector_store(
                             self.vector_store,

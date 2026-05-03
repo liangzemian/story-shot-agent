@@ -43,6 +43,7 @@ class TaskStage(Enum):
 
     # 初始化
     INIT = StageInfo("init", "初始化", 0)
+    PROCESSING = StageInfo("processing", "流程中", 0)
 
     # 剧本解析阶段
     PARSING_START = StageInfo("parsing_start", "开始解析剧本", 0)

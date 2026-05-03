@@ -10,9 +10,9 @@ import threading
 from datetime import datetime
 from typing import Dict, Optional, List, Any
 
-from penshot.logger import debug, error, info
+from penshot.logger import debug, error, info, warning
 from penshot.neopen.agent.workflow.workflow_models import PipelineNode
-from penshot.neopen.agent.workflow.workflow_states import WorkflowState
+from penshot.neopen.agent.workflow.workflow_state_types import WorkflowState
 from penshot.neopen.knowledge.memory.memory_manager import MemoryManager
 from penshot.neopen.knowledge.memory.memory_models import MemoryLevel
 from penshot.neopen.tools.result_storage_tool import ResultStorage
@@ -40,36 +40,58 @@ class WorkflowOutputWriter:
         self.memory = memory
         self._background_loop: Optional[asyncio.AbstractEventLoop] = None
         self._background_thread: Optional[threading.Thread] = None
+        self._loop_ready = threading.Event()  # 使用事件通知循环就绪
         self._start_background_loop()
 
     def _start_background_loop(self):
         """启动后台事件循环"""
         def run_loop():
-            self._background_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._background_loop)
-            self._background_loop.run_forever()
+            # 创建新的事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._background_loop = loop
+            self._loop_ready.set()  # 通知循环已就绪
 
+            try:
+                loop.run_forever()
+            except Exception as e:
+                error(f"后台事件循环异常退出: {e}")
+            finally:
+                loop.close()
+                self._background_loop = None
+
+        # 启动后台线程
         self._background_thread = threading.Thread(target=run_loop, daemon=True)
         self._background_thread.start()
 
-        # 等待循环启动
-        import time
+        # 等待循环启动完成（最多等待5秒）
         timeout = 5
-        start = time.time()
-        while self._background_loop is None and (time.time() - start) < timeout:
-            time.sleep(0.01)
+        if not self._loop_ready.wait(timeout):
+            warning(f"后台事件循环启动超时 ({timeout}秒)，部分异步操作可能失败")
+
+    def _is_loop_running(self) -> bool:
+        """检查后台循环是否正在运行"""
+        return (self._background_loop is not None and
+                self._background_loop.is_running())
 
     def _run_async(self, coro):
         """在后台事件循环中运行协程"""
-        if self._background_loop is None:
+        if not self._is_loop_running():
+            warning("后台事件循环未运行，降级为同步执行")
             # 降级：同步执行
             try:
                 loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 return loop.run_until_complete(coro)
             except Exception as e:
                 error(f"同步执行失败: {e}")
-                return
-        return asyncio.run_coroutine_threadsafe(coro, self._background_loop)
+                return None
+
+        try:
+            return asyncio.run_coroutine_threadsafe(coro, self._background_loop)
+        except RuntimeError as e:
+            error(f"提交异步任务失败: {e}")
+            return None
 
     def save_all_reports(self, state: WorkflowState):
         """
@@ -89,47 +111,53 @@ class WorkflowOutputWriter:
             self._save_repair_history(state),
             self._save_quality_report(state),
             self._save_continuity_report(state),
-            self._save_memory_report(state.script_id, state.task_id)
+            self._save_memory_report(state.input.script_id, state.input.task_id)
         ]
 
         # 并发执行所有保存任务
-        await asyncio.gather(*tasks, return_exceptions=True)
-        debug(f"剧本 {state.script_id} 的任务 {state.task_id} 所有报告已保存")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 检查是否有失败的任务
+        failed_count = sum(1 for r in results if isinstance(r, Exception))
+        if failed_count > 0:
+            warning(f"有 {failed_count}/{len(tasks)} 个报告保存失败")
+
+        debug(f"剧本 {state.input.script_id} 的任务 {state.input.task_id} 所有报告已保存")
 
     async def _save_execution_summary(self, state: WorkflowState):
         """保存执行摘要"""
         try:
             # 计算总时长
             total_duration = 0
-            if state.instructions:
-                total_duration = sum(f.duration for f in state.instructions.fragments)
+            if state.domain.instructions:
+                total_duration = sum(f.duration for f in state.domain.instructions.fragments)
 
             # 获取审查分数
-            audit_score = state.audit_report.score if state.audit_report else 0
-            audit_status = state.audit_report.status.value if state.audit_report else "unknown"
+            audit_score = state.domain.audit_report.score if state.domain.audit_report else 0
+            audit_status = state.domain.audit_report.status.value if state.domain.audit_report else "unknown"
 
             summary = {
-                "task_id": state.task_id,
-                "script_id": state.script_id,
+                "task_id": state.input.task_id,
+                "script_id": state.input.script_id,
                 "status": "completed",
-                "created_at": state.final_output.get("created_at") if state.final_output else datetime.now().isoformat(),
-                "completed_at": state.final_output.get("completed_at") if state.final_output else datetime.now().isoformat(),
+                "created_at": state.output.final_output.get("created_at") if state.output.final_output else datetime.now().isoformat(),
+                "completed_at": state.output.final_output.get("completed_at") if state.output.final_output else datetime.now().isoformat(),
                 "statistics": {
-                    "total_fragments": len(state.instructions.fragments) if state.instructions else 0,
+                    "total_fragments": len(state.domain.instructions.fragments) if state.domain.instructions else 0,
                     "total_duration": total_duration,
-                    "shot_count": len(state.shot_sequence.shots) if state.shot_sequence else 0,
-                    "scene_count": len(state.parsed_script.scenes) if state.parsed_script else 0,
-                    "character_count": len(state.parsed_script.characters) if state.parsed_script else 0
+                    "shot_count": len(state.domain.shot_sequence.shots) if state.domain.shot_sequence else 0,
+                    "scene_count": len(state.domain.parsed_script.scenes) if state.domain.parsed_script else 0,
+                    "character_count": len(state.domain.parsed_script.characters) if state.domain.parsed_script else 0
                 },
                 "audit_summary": {
                     "status": audit_status,
                     "score": audit_score,
-                    "violations_count": len(state.audit_report.violations) if state.audit_report else 0
+                    "violations_count": len(state.domain.audit_report.violations) if state.domain.audit_report else 0
                 }
             }
 
-            await self._save_json_async(state.script_id, state.task_id, summary, "execution_summary.json")
-            debug(f"执行摘要已保存: {state.script_id} -> {state.task_id}")
+            await self._save_json_async(state.input.script_id, state.input.task_id, summary, "execution_summary.json")
+            debug(f"执行摘要已保存: {state.input.script_id} -> {state.input.task_id}")
         except Exception as e:
             error(f"保存执行摘要失败: {e}")
 
@@ -161,8 +189,8 @@ class WorkflowOutputWriter:
                 "prompt_converter": convert_stats
             }
 
-            await self._save_json_async(state.script_id, state.task_id, stage_stats, "stage_statistics.json")
-            debug(f"阶段统计已保存: {state.script_id} -> {state.task_id}")
+            await self._save_json_async(state.input.script_id, state.input.task_id, stage_stats, "stage_statistics.json")
+            debug(f"阶段统计已保存: {state.input.script_id} -> {state.input.task_id}")
         except Exception as e:
             error(f"保存阶段统计失败: {e}")
 
@@ -227,8 +255,8 @@ class WorkflowOutputWriter:
                 return severity_groups
 
             issues_report = {
-                "task_id": state.task_id,
-                "script_id": state.script_id,
+                "task_id": state.input.task_id,
+                "script_id": state.input.script_id,
                 "total_issues": len(parse_issues) + len(segment_issues) + len(split_issues) + len(convert_issues),
                 "by_stage": {
                     "script_parser": {
@@ -259,8 +287,8 @@ class WorkflowOutputWriter:
                 }
             }
 
-            await self._save_json_async(state.script_id, state.task_id, issues_report, "issues_report.json")
-            debug(f"问题报告已保存: {state.script_id} -> {state.task_id}")
+            await self._save_json_async(state.input.script_id, state.input.task_id, issues_report, "issues_report.json")
+            debug(f"问题报告已保存: {state.input.script_id} -> {state.input.task_id}")
         except Exception as e:
             error(f"保存问题报告失败: {e}")
 
@@ -286,8 +314,8 @@ class WorkflowOutputWriter:
             )
 
             repair_history = {
-                "task_id": state.task_id,
-                "script_id": state.script_id,
+                "task_id": state.input.task_id,
+                "script_id": state.input.script_id,
                 "repair_count": sum(1 for r in [repair_parse, repair_segment, repair_split, repair_convert] if r),
                 "repairs": {
                     "script_parser": repair_parse,
@@ -297,8 +325,8 @@ class WorkflowOutputWriter:
                 }
             }
 
-            await self._save_json_async(state.script_id, state.task_id, repair_history, "repair_history.json")
-            debug(f"修复历史已保存: {state.script_id} -> {state.task_id}")
+            await self._save_json_async(state.input.script_id, state.input.task_id, repair_history, "repair_history.json")
+            debug(f"修复历史已保存: {state.input.script_id} -> {state.input.task_id}")
         except Exception as e:
             error(f"保存修复历史失败: {e}")
 
@@ -329,18 +357,18 @@ class WorkflowOutputWriter:
                 })
 
             quality_report = {
-                "task_id": state.task_id,
-                "script_id": state.script_id,
+                "task_id": state.input.task_id,
+                "script_id": state.input.script_id,
                 "total_audits": len(audit_history),
                 "latest_audit": latest_audit,
                 "audit_history": audit_history,
                 "quality_score_trend": quality_trend,
-                "final_score": state.audit_report.score if state.audit_report else 0,
-                "final_status": state.audit_report.status.value if state.audit_report else "unknown"
+                "final_score": state.domain.audit_report.score if state.domain.audit_report else 0,
+                "final_status": state.domain.audit_report.status.value if state.domain.audit_report else "unknown"
             }
 
-            await self._save_json_async(state.script_id, state.task_id, quality_report, "quality_report.json")
-            debug(f"质量报告已保存: {state.script_id} -> {state.task_id}")
+            await self._save_json_async(state.input.script_id, state.input.task_id, quality_report, "quality_report.json")
+            debug(f"质量报告已保存: {state.input.script_id} -> {state.input.task_id}")
         except Exception as e:
             error(f"保存质量报告失败: {e}")
 
@@ -376,18 +404,18 @@ class WorkflowOutputWriter:
                     issues_by_severity[severity] += 1
 
             continuity_report = {
-                "task_id": state.task_id,
-                "script_id": state.script_id,
+                "task_id": state.input.task_id,
+                "script_id": state.input.script_id,
                 "total_continuity_issues": len(continuity_history),
                 "issues_by_type": issues_by_type,
                 "issues_by_severity": issues_by_severity,
-                "continuity_retry_count": getattr(state, 'continuity_retry_count', 0),
-                "continuity_passed": getattr(state, 'continuity_passed', False),
+                "continuity_retry_count": state.domain.continuity_retry_count,
+                "continuity_passed": state.domain.continuity_passed,
                 "issues": continuity_history[-50:]  # 只保留最近50条
             }
 
-            await self._save_json_async(state.script_id, state.task_id, continuity_report, "continuity_report.json")
-            debug(f"连续性报告已保存: {state.script_id} -> {state.task_id}")
+            await self._save_json_async(state.input.script_id, state.input.task_id, continuity_report, "continuity_report.json")
+            debug(f"连续性报告已保存: {state.input.script_id} -> {state.input.task_id}")
         except Exception as e:
             error(f"保存连续性报告失败: {e}")
 
@@ -435,10 +463,14 @@ class WorkflowOutputWriter:
 
     def shutdown(self):
         """关闭后台线程"""
-        if self._background_loop:
+        if self._background_loop and self._background_loop.is_running():
             self._background_loop.call_soon_threadsafe(self._background_loop.stop)
+
         if self._background_thread and self._background_thread.is_alive():
             self._background_thread.join(timeout=5)
+
+        self._background_loop = None
+        self._background_thread = None
         info("WorkflowOutputWriter 已关闭")
 
     # ============================= 辅助方法 =============================

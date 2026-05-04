@@ -146,22 +146,41 @@ class QualityAuditorAgent:
             error(f"质量审查异常: {e}")
             return self._create_fallback_report(instructions)
 
-    def record_repair(self, stage: str, issues_fixed: List[str], success: bool):
-        """记录修复操作 - 修复版，避免截断"""
-        # 确保 issues_fixed 列表不会过大
-        if len(issues_fixed) > 20:
-            issues_fixed = issues_fixed[:20] + [f"... 还有{len(issues_fixed) - 20}个问题"]
 
-        # 确保描述不会过长
-        for i, issue in enumerate(issues_fixed):
-            if isinstance(issue, str) and len(issue) > 200:
-                issues_fixed[i] = issue[:197] + "..."
+    def record_repair(self, stage: str, issues_fixed: List[str], success: bool):
+        """记录修复操作 - 修复版，避免存储日志内容"""
+        # 过滤掉非修复操作的内容（如日志文本）
+        filtered_issues = []
+        for issue in issues_fixed:
+            # 跳过明显的日志内容
+            if not isinstance(issue, str):
+                filtered_issues.append(str(issue))
+                continue
+
+            # 跳过包含"系统日志"、"根据提供的对话内容"等关键词的条目
+            skip_keywords = ["系统日志", "根据提供的对话内容", "解析尝试", "完整度得分", "置信度"]
+            should_skip = any(kw in issue for kw in skip_keywords)
+
+            if not should_skip and len(issue) < 500:
+                filtered_issues.append(issue)
+            elif not should_skip:
+                # 截断过长的描述
+                filtered_issues.append(issue[:200] + "...")
+
+        # 如果没有有效的修复记录，不添加
+        if not filtered_issues:
+            debug(f"跳过空修复记录: stage={stage}")
+            return
+
+        # 确保 issues_fixed 列表不会过大
+        if len(filtered_issues) > 20:
+            filtered_issues = filtered_issues[:20] + [f"... 还有{len(filtered_issues) - 20}个问题"]
 
         repair_record = RepairHistory(
             timestamp=time.time(),
             stage=stage,
-            issue_count=len(issues_fixed),
-            issues_fixed=issues_fixed,
+            issue_count=len(filtered_issues),
+            issues_fixed=filtered_issues,
             success=success
         )
         self.repair_history.append(repair_record)
@@ -170,7 +189,8 @@ class QualityAuditorAgent:
         if len(self.repair_history) > 100:
             self.repair_history = self.repair_history[-100:]
 
-        debug(f"记录修复: stage={stage}, fixed={len(issues_fixed)}, success={success}")
+        debug(f"记录修复: stage={stage}, fixed={len(filtered_issues)}, success={success}")
+
 
     def get_repair_history(self, stage: Optional[str] = None,
                            success_only: bool = False) -> List[RepairHistory]:

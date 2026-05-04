@@ -147,14 +147,16 @@ class QualityAuditorAgent:
             return self._create_fallback_report(instructions)
 
     def record_repair(self, stage: str, issues_fixed: List[str], success: bool):
-        """
-        记录修复操作
+        """记录修复操作 - 修复版，避免截断"""
+        # 确保 issues_fixed 列表不会过大
+        if len(issues_fixed) > 20:
+            issues_fixed = issues_fixed[:20] + [f"... 还有{len(issues_fixed) - 20}个问题"]
 
-        Args:
-            stage: 修复阶段（如 "segment_shot", "convert_prompt"）
-            issues_fixed: 已修复的问题ID或描述列表
-            success: 修复是否成功
-        """
+        # 确保描述不会过长
+        for i, issue in enumerate(issues_fixed):
+            if isinstance(issue, str) and len(issue) > 200:
+                issues_fixed[i] = issue[:197] + "..."
+
         repair_record = RepairHistory(
             timestamp=time.time(),
             stage=stage,
@@ -448,7 +450,7 @@ class QualityAuditorAgent:
         return summary
 
     def _post_process_report(self, report: QualityAuditReport) -> QualityAuditReport:
-        """后处理报告"""
+        """后处理报告 - 修复版，统一评分字段"""
         # 计算统计信息
         severity_counts = {severity.value: 0 for severity in SeverityLevel}
         for violation in report.violations:
@@ -456,6 +458,7 @@ class QualityAuditorAgent:
             severity_str = severity.value if hasattr(severity, 'value') else str(severity)
             severity_counts[severity_str] = severity_counts.get(severity_str, 0) + 1
 
+        # 更新 stats，移除 quality_score 避免混淆
         report.stats.update({
             "total_violations": len(report.violations),
             SeverityLevel.INFO.value: severity_counts.get(SeverityLevel.INFO.value, 0),
@@ -466,7 +469,15 @@ class QualityAuditorAgent:
             SeverityLevel.ERROR.value: severity_counts.get(SeverityLevel.ERROR.value, 0),
         })
 
-        # 计算质量分数
+        # 移除 stats 中的 quality_score 字段，避免与顶层 score 混淆
+        if "quality_score" in report.stats:
+            del report.stats["quality_score"]
+        if "has_issues" in report.stats:
+            del report.stats["has_issues"]
+        if "needs_human_review" in report.stats:
+            del report.stats["needs_human_review"]
+
+        # 计算质量分数（使用统一的权重计算）
         base_score = 100.0
         for violation in report.violations:
             severity = violation.severity

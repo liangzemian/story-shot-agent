@@ -334,6 +334,7 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
             ))
 
         # 5. 检查镜头连续性（相邻镜头是否合理）
+        seen_repetitive_pairs = set()
         for i in range(len(shots) - 1):
             curr_shot = shots[i]
             next_shot = shots[i + 1]
@@ -344,18 +345,21 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
 
             # 检查相似镜头重复
             if curr_shot.shot_type == next_shot.shot_type:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.SHOT_REPETITIVE.code,
-                    rule_name=RuleType.SHOT_REPETITIVE.description,
-                    issue_type=IssueType.CONTINUITY,
-                    source_node=PipelineNode.SEGMENT_SHOT,
-                    description=f"镜头{curr_shot.id}和{next_shot.id}类型相同且连续",
-                    severity=SeverityLevel.WARNING,
-                    fragment_id=curr_shot.id,
-                    suggestion="考虑切换不同镜头类型增加变化"
-                ))
+                pair_key = f"{curr_shot.id}_{next_shot.id}"
+                if pair_key not in seen_repetitive_pairs:
+                    seen_repetitive_pairs.add(pair_key)
+                    issues.append(BasicViolation(
+                        rule_code=RuleType.SHOT_REPETITIVE.code,
+                        rule_name=RuleType.SHOT_REPETITIVE.description,
+                        issue_type=IssueType.CONTINUITY,
+                        source_node=PipelineNode.SEGMENT_SHOT,
+                        description=f"镜头{curr_shot.id}和{next_shot.id}类型相同且连续",
+                        severity=SeverityLevel.WARNING,
+                        fragment_id=curr_shot.id,
+                        suggestion="考虑切换不同镜头类型增加变化"
+                    ))
 
-        # 6. 检查角色一致性
+        # 检查角色一致性
         characters_in_shots = set()
         for shot in shots:
             if shot.main_character:
@@ -377,6 +381,7 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
                 ))
 
         return issues
+
 
     def repair_shots(self, shot_sequence: ShotSequence, issues: List[BasicViolation],
                      structured_script: ParsedScript) -> ShotSequence:
@@ -473,17 +478,37 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
 
         # ========== 4. 修复重复镜头问题 ==========
         if repetitive_issues:
-            # 为相邻相同类型的镜头添加变化
+            # 可用的镜头类型（按视觉冲击力排序）
+            shot_type_pool = [
+                ShotType.WIDE_SHOT,  # 全景
+                ShotType.LONG_SHOT,  # 远景
+                ShotType.MEDIUM_SHOT,  # 中景
+                ShotType.CLOSE_UP,  # 特写
+                ShotType.EXTREME_CLOSE_UP,  # 极特写
+                ShotType.OVER_SHOULDER,  # 过肩
+                ShotType.POV,  # 主观视角
+                ShotType.TWO_SHOT  # 双人
+            ]
+
+            # 去重处理：避免重复修复同一对镜头
+            processed_pairs = set()
             for i in range(len(shot_sequence.shots) - 1):
                 curr = shot_sequence.shots[i]
                 next_shot = shot_sequence.shots[i + 1]
 
+                pair_key = f"{curr.id}_{next_shot.id}"
+                if pair_key in processed_pairs:
+                    continue
+
                 if curr.shot_type == next_shot.shot_type:
-                    # 改变下一个镜头的类型
-                    alt_types = [t for t in ShotType if t != curr.shot_type]
+                    processed_pairs.add(pair_key)
+                    # 选择不同的镜头类型
+                    alt_types = [t for t in shot_type_pool if t != curr.shot_type]
                     if alt_types:
-                        next_shot.shot_type = alt_types[i % len(alt_types)]
-                        repair_actions.append(f"调整重复镜头: {next_shot.id} 类型改为 {next_shot.shot_type.value}")
+                        new_type = alt_types[i % len(alt_types)]
+                        old_type = next_shot.shot_type
+                        next_shot.shot_type = new_type
+                        repair_actions.append(f"调整重复镜头: {next_shot.id} {old_type.value} -> {new_type.value}")
 
         # ========== 5. 修复角色缺失问题 ==========
         if character_issues and structured_script.characters:

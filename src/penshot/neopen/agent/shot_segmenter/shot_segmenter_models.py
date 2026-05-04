@@ -23,7 +23,7 @@ class ShotType(str, Enum):
         情感表达（喜悦、悲伤、愤怒）
         角色反应镜头
     """
-    CLOSE_UP = "close_up"
+    CLOSE_UP = "close_up"    # 特写
     """
         眼睛特写（表现恐惧、震惊）
         扣动扳机的手指
@@ -31,19 +31,43 @@ class ShotType(str, Enum):
         瞳孔放大/缩小
         泪水滑落瞬间
     """
-    EXTREME_CLOSE_UP = "extreme_close_up"
-    MEDIUM_SHOT = "medium_shot"
-    WIDE_SHOT = "wide_shot"
-    LONG_SHOT = "long_shot"
+    EXTREME_CLOSE_UP = "extreme_close_up" # 极特写
 
-    @staticmethod
-    def get_type_mapping():
+    WIDE_SHOT = "wide_shot"  # 远景/广角
+    LONG_SHOT = "long_shot"  # 全景/远景
+    MEDIUM_SHOT = "medium_shot"  # 中景
+
+    # 特殊镜头类型
+    OVER_SHOULDER = "over_shoulder"  # 过肩镜头
+    POV = "pov"  # 主观视角
+    TWO_SHOT = "two_shot"  # 双人镜头
+
+    # 动态镜头类型
+    FOLLOWING_SHOT = "following_shot"  # 跟拍镜头
+    PANORAMA = "panorama"  # 摇摄/全景移动
+    ZOOM = "zoom"  # 推拉镜头
+
+    # 动作相关
+    ACTION = "action"  # 动作镜头
+    MOVING = "moving"  # 移动镜头
+
+    @classmethod
+    def get_type_mapping(cls) -> Dict['ShotType', str]:
+        """获取镜头类型描述映射"""
         return {
-            ShotType.CLOSE_UP: "特写",
-            ShotType.EXTREME_CLOSE_UP: "极特写",
-            ShotType.MEDIUM_SHOT: "中景",
-            ShotType.WIDE_SHOT: "全景",
-            ShotType.LONG_SHOT: "远景",
+            cls.WIDE_SHOT: "远景镜头，展现场景全貌",
+            cls.LONG_SHOT: "全景镜头，展示人物全身",
+            cls.MEDIUM_SHOT: "中景镜头，展现人物上半身",
+            cls.CLOSE_UP: "特写镜头，聚焦面部表情",
+            cls.EXTREME_CLOSE_UP: "极特写镜头，强调细节",
+            cls.OVER_SHOULDER: "过肩镜头，对话视角",
+            cls.POV: "主观视角，第一人称",
+            cls.TWO_SHOT: "双人镜头，两人同框",
+            cls.FOLLOWING_SHOT: "跟拍镜头，跟随运动",
+            cls.PANORAMA: "摇摄镜头，水平移动",
+            cls.ZOOM: "推拉镜头，焦距变化",
+            cls.ACTION: "动作镜头，捕捉动作",
+            cls.MOVING: "移动镜头，动态视角",
         }
 
 

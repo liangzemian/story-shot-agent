@@ -201,7 +201,7 @@ class WorkflowNodes:
             # 5. 问题检测（使用 workflow_memory 存储问题列表）
             parse_issues = self.script_parser.detect_issues(parsed_script, state.input.raw_script)
             if parse_issues:
-                self.workflow_memory._store_short_term_memory(
+                self.workflow_memory.store_short_term_memory(
                     stage_key="parse_script_issues",
                     result=[issue.dict() for issue in parse_issues],
                     stats={"issue_count": len(parse_issues)},
@@ -740,7 +740,7 @@ class WorkflowNodes:
             state.domain.audit_timestamp = datetime.now().isoformat()
 
             # 存储最新审查结果（使用 workflow_memory）
-            self.workflow_memory._store_short_term_memory(
+            self.workflow_memory.store_short_term_memory(
                 stage_key="latest_audit_result",
                 result={
                     "timestamp": datetime.now().isoformat(),

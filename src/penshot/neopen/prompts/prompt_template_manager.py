@@ -433,7 +433,7 @@ class PromptTemplateManager:
             if save_to_memory and self.memory_manager:
                 self._save_to_memory(prompt_text, metadata)
 
-            info(f"添加提示词模板成功，当前总数: {len(self._templates_cache)}")
+            debug(f"添加提示词模板成功，当前总数: {len(self._templates_cache)}")
             return True
 
         except Exception as e:

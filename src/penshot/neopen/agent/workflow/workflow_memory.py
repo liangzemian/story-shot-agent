@@ -76,13 +76,13 @@ class WorkflowMemory:
             stats["stage_completed_at"] = timestamp
 
             # 2. 短期记忆缓存（完整结果）
-            self._store_short_term_memory(stage_key, result, stats, timestamp)
+            self.store_short_term_memory(stage_key, result, stats, timestamp)
 
             # 3. 中期记忆持久化（统计摘要）
-            self._store_medium_term_memory(stage_key, stats, timestamp)
+            self.store_medium_term_memory(stage_key, stats, timestamp)
 
             # 4. 长期记忆知识存储（成功模式）
-            self._store_long_term_memory(stage_key, result, stats, timestamp)
+            self.store_long_term_memory(stage_key, result, stats, timestamp)
 
             info(f"阶段记忆保存完成: {stage_key}, 统计摘要: {json.dumps(stats, ensure_ascii=False, default=str)[:200]}")
 
@@ -326,7 +326,7 @@ class WorkflowMemory:
                 elif isinstance(result, dict) and attr in result:
                     stats[attr] = result[attr]
 
-    def _store_short_term_memory(self, stage_key: str, result: Any, stats: Dict, timestamp: str) -> None:
+    def store_short_term_memory(self, stage_key: str, result: Any, stats: Dict, timestamp: str) -> None:
         """
         存储短期记忆 - 缓存最近的阶段结果
 
@@ -404,7 +404,7 @@ class WorkflowMemory:
         except Exception as e:
             warning(f"存储短期记忆失败: {stage_key}, {e}")
 
-    def _store_medium_term_memory(self, stage_key: str, stats: Dict, timestamp: str) -> None:
+    def store_medium_term_memory(self, stage_key: str, stats: Dict, timestamp: str) -> None:
         """
         存储中期记忆 - 阶段统计摘要持久化
 
@@ -537,7 +537,7 @@ class WorkflowMemory:
 
         return summary
 
-    def _store_long_term_memory(self, stage_key: str, result: Any, stats: Dict, timestamp: str) -> None:
+    def store_long_term_memory(self, stage_key: str, result: Any, stats: Dict, timestamp: str) -> None:
         """
         存储长期记忆 - 成功模式和可复用知识
 

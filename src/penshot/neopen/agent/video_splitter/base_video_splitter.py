@@ -64,6 +64,9 @@ class BaseVideoSplitter(ABC):
             "cutter_type": self.__class__.__name__
         })
 
+        # 调用更新统计方法
+        fragment_sequence.update_stats()
+
         info(f"分割完成: {len(fragments)}个片段, 总时长{total_duration:.2f}秒")
         return fragment_sequence
 

@@ -445,12 +445,50 @@ class ContinuityCheckResult(BaseModel):
             "check_timestamp": self.check_timestamp
         }
 
-    def to_report(self) -> Dict[str, Any]:
-        """转换为报告格式"""
+
+    def to_report(self, task_id: str, script_id: str) -> Dict[str, Any]:
+        """转换为标准报告格式"""
+        # 统计问题类型
+        issues_by_type = {}
+        issues_by_severity = {s.value: 0 for s in ContinuitySeverity}
+
+        structured_issues = []
+        for issue in self.issues:
+            # 构建结构化问题对象
+            structured_issue = {
+                "id": issue.id,
+                "type": issue.type.value,
+                "description": issue.description,
+                "severity": issue.severity.value,
+                "fragment_id": issue.fragment_id,
+                "shot_id": issue.shot_id,
+                "scene_id": issue.scene_id,
+                "position": issue.position,
+                "suggestion": issue.suggestion,
+                "auto_fixable": issue.auto_fixable,
+                "source_stage": issue.source_stage.value if issue.source_stage else None,
+                "timestamp": issue.timestamp
+            }
+            structured_issues.append(structured_issue)
+
+            # 统计
+            type_key = issue.type.value
+            issues_by_type[type_key] = issues_by_type.get(type_key, 0) + 1
+
+            severity_key = issue.severity.value
+            issues_by_severity[severity_key] = issues_by_severity.get(severity_key, 0) + 1
+
         return {
+            "task_id": task_id,
+            "script_id": script_id,
             "passed": self.passed,
+            "total_continuity_issues": self.total_issues,
+            "issues_by_type": issues_by_type,
+            "issues_by_severity": issues_by_severity,
+            "continuity_retry_count": 0,
+            "continuity_passed": self.passed,
+            "issues": structured_issues,  # 结构化问题列表
             "summary": self.get_summary(),
-            "issues": [issue.model_dump() for issue in self.issues],
             "metadata": self.metadata
         }
 

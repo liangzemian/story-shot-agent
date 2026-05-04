@@ -5,13 +5,15 @@
 @Github: https://github.com/neopen/story-shot-agent
 @Time: 2026/1/25 21:59
 """
-from typing import Optional, Dict, List, Any
+import time
+from typing import Optional, Dict, List, Any, Set
 
 from penshot.logger import debug, info, error
 from penshot.neopen.agent.base_models import AgentMode
 from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIVideoInstructions
 from penshot.neopen.agent.quality_auditor.quality_auditor_factory import QualityAuditorFactory
-from penshot.neopen.agent.quality_auditor.quality_auditor_models import QualityAuditReport, AuditStatus, SeverityLevel, IssueType, QualityRepairParams, BasicViolation
+from penshot.neopen.agent.quality_auditor.quality_auditor_models import QualityAuditReport, AuditStatus, SeverityLevel, IssueType, QualityRepairParams, BasicViolation, \
+    RepairHistory
 from penshot.neopen.agent.workflow.workflow_models import PipelineNode
 from penshot.neopen.shot_config import ShotConfig
 from penshot.utils.log_utils import print_log_exception
@@ -32,7 +34,7 @@ class QualityAuditorAgent:
         self.config = config or {}
 
         # 初始化各审查器
-        if self.config.enable_llm:
+        if getattr(self.config, 'enable_llm', False):
             self.rule_auditor = QualityAuditorFactory.create_auditor(AgentMode.RULE, config)
             self.llm_auditor = QualityAuditorFactory.create_auditor(AgentMode.LLM, config, llm)
         else:
@@ -69,14 +71,19 @@ class QualityAuditorAgent:
 
         # 严重程度权重
         self.severity_weights = {
-            SeverityLevel.INFO: 1,
+            SeverityLevel.INFO: 0,
             SeverityLevel.WARNING: 5,
             SeverityLevel.MODERATE: 10,
-            SeverityLevel.MAJOR: 20,
-            SeverityLevel.CRITICAL: 30,
-            SeverityLevel.ERROR: 50,
+            SeverityLevel.MAJOR: 25,
+            SeverityLevel.CRITICAL: 40,
+            SeverityLevel.ERROR: 60,
         }
 
+        # 修复历史记录
+        self.repair_history: List[RepairHistory] = []
+
+        # 去重缓存
+        self._seen_violations: Set[str] = set()
 
     def qa_process(self, instructions: AIVideoInstructions,
                    stage_issues: Optional[Dict[PipelineNode, List[BasicViolation]]] = None,
@@ -108,6 +115,9 @@ class QualityAuditorAgent:
         if stage_issues is None:
             stage_issues = {}
 
+        # 清望去重缓存
+        self._seen_violations.clear()
+
         try:
             # 1. 执行基本规则审查
             rule_report = self.rule_auditor.audit(instructions)
@@ -119,8 +129,8 @@ class QualityAuditorAgent:
                 llm_report = self.llm_auditor.audit(instructions, historical_context)  # 传递历史上下文
                 info(f"LLM审查完成，发现{len(llm_report.violations) if llm_report else 0}个问题")
 
-            # 3. 合并报告（包含各阶段问题）
-            merged_report = self._merge_reports(rule_report, llm_report, instructions, stage_issues)
+            # 3. 合并报告（包含各阶段问题，带去重）
+            merged_report = self._merge_reports_with_dedup(rule_report, llm_report, instructions, stage_issues)
 
             # 4. 增强报告：添加问题分类和修复参数
             enhanced_report = self._enhance_report(merged_report, instructions, stage_issues, historical_context)
@@ -128,7 +138,7 @@ class QualityAuditorAgent:
             # 5. 后处理（计算分数、状态等）
             final_report = self._post_process_report(enhanced_report)
 
-            info(f"质量审查完成: 状态={final_report.status.value}, 分数={final_report.score}%, 问题={len(final_report.violations)}个")
+            info(f"质量审查完成: 状态={final_report.status.value}, 分数={final_report.score:.1f}%, 问题={len(final_report.violations)}个")
             return final_report
 
         except Exception as e:
@@ -136,13 +146,407 @@ class QualityAuditorAgent:
             error(f"质量审查异常: {e}")
             return self._create_fallback_report(instructions)
 
+    def record_repair(self, stage: str, issues_fixed: List[str], success: bool):
+        """
+        记录修复操作
+
+        Args:
+            stage: 修复阶段（如 "segment_shot", "convert_prompt"）
+            issues_fixed: 已修复的问题ID或描述列表
+            success: 修复是否成功
+        """
+        repair_record = RepairHistory(
+            timestamp=time.time(),
+            stage=stage,
+            issue_count=len(issues_fixed),
+            issues_fixed=issues_fixed,
+            success=success
+        )
+        self.repair_history.append(repair_record)
+
+        # 只保留最近100条记录
+        if len(self.repair_history) > 100:
+            self.repair_history = self.repair_history[-100:]
+
+        debug(f"记录修复: stage={stage}, fixed={len(issues_fixed)}, success={success}")
+
+    def get_repair_history(self, stage: Optional[str] = None,
+                           success_only: bool = False) -> List[RepairHistory]:
+        """
+        获取修复历史
+
+        Args:
+            stage: 可选，按阶段过滤
+            success_only: 是否只返回成功的修复记录
+
+        Returns:
+            修复历史记录列表
+        """
+        history = self.repair_history
+
+        if stage:
+            history = [h for h in history if h.stage == stage]
+
+        if success_only:
+            history = [h for h in history if h.success]
+
+        return history
+
+    def get_repair_success_rate(self, stage: Optional[str] = None) -> float:
+        """
+        计算修复成功率
+
+        Args:
+            stage: 可选，按阶段计算
+
+        Returns:
+            成功率（0-1之间）
+        """
+        history = self.repair_history
+        if stage:
+            history = [h for h in history if h.stage == stage]
+
+        if not history:
+            return 0.0
+
+        success_count = sum(1 for h in history if h.success)
+        return success_count / len(history)
+
+    def get_repair_patterns(self) -> Dict[str, Any]:
+        """
+        分析修复模式，用于历史上下文
+
+        Returns:
+            修复模式统计信息
+        """
+        if not self.repair_history:
+            return {}
+
+        # 按阶段统计
+        stage_stats = {}
+        for record in self.repair_history:
+            if record.stage not in stage_stats:
+                stage_stats[record.stage] = {
+                    "total": 0,
+                    "success": 0,
+                    "failed": 0,
+                    "common_issues": {}
+                }
+
+            stage_stats[record.stage]["total"] += 1
+            if record.success:
+                stage_stats[record.stage]["success"] += 1
+            else:
+                stage_stats[record.stage]["failed"] += 1
+
+            # 统计常见问题
+            for issue in record.issues_fixed:
+                if issue not in stage_stats[record.stage]["common_issues"]:
+                    stage_stats[record.stage]["common_issues"][issue] = 0
+                stage_stats[record.stage]["common_issues"][issue] += 1
+
+        # 计算成功率
+        for stage in stage_stats:
+            total = stage_stats[stage]["total"]
+            if total > 0:
+                stage_stats[stage]["success_rate"] = stage_stats[stage]["success"] / total
+            else:
+                stage_stats[stage]["success_rate"] = 0.0
+
+            # 只保留高频问题（出现次数>=2）
+            common = stage_stats[stage]["common_issues"]
+            stage_stats[stage]["common_issues"] = {
+                k: v for k, v in common.items() if v >= 2
+            }
+
+        return {
+            "total_repairs": len(self.repair_history),
+            "overall_success_rate": self.get_repair_success_rate(),
+            "by_stage": stage_stats
+        }
+
+
+    def _merge_reports_with_dedup(self, rule_report: QualityAuditReport,
+                                  llm_report: Optional[QualityAuditReport],
+                                  instructions: AIVideoInstructions,
+                                  stage_issues: Dict[PipelineNode, List[BasicViolation]]) -> QualityAuditReport:
+        """合并基本规则、LLM审查报告和各阶段问题（带去重）"""
+        # 创建合并报告（基于规则报告）
+        merged = QualityAuditReport(
+            project_info=instructions.project_info,
+            checks=rule_report.checks.copy(),
+            violations=[],
+            stats=rule_report.stats.copy()
+        )
+
+        # 去重缓存
+        seen_signatures = set()
+
+        def add_violation(violation, source_node=None):
+            """添加问题（带去重）"""
+            # 生成唯一签名
+            fragment_id = getattr(violation, 'fragment_id', None) or ''
+            description = getattr(violation, 'description', '')[:150] if getattr(violation, 'description', '') else ''
+            severity = getattr(violation, 'severity', SeverityLevel.WARNING)
+            severity_str = severity.value if hasattr(severity, 'value') else str(severity)
+            issue_type = getattr(violation, 'issue_type', IssueType.OTHER)
+            issue_type_str = issue_type.value if hasattr(issue_type, 'value') else str(issue_type)
+
+            signature = f"{fragment_id}_{severity_str}_{issue_type_str}_{description}"
+
+            if signature not in seen_signatures:
+                seen_signatures.add(signature)
+                # 设置来源节点
+                if source_node and not hasattr(violation, 'source_node'):
+                    violation.source_node = source_node
+                merged.violations.append(violation)
+                return True
+            return False
+
+        # 1. 合并规则报告的问题
+        for violation in rule_report.violations:
+            add_violation(violation)
+
+        # 2. 合并LLM报告的问题
+        if llm_report:
+            for violation in llm_report.violations:
+                add_violation(violation)
+
+        # 3. 合并各阶段检测到的问题
+        total_stage_issues = 0
+        for node, issues in stage_issues.items():
+            if issues:
+                total_stage_issues += len(issues)
+                for issue in issues:
+                    # 确保 issue 是 BasicViolation 对象
+                    if isinstance(issue, dict):
+                        # 如果是字典，转换为 BasicViolation 对象
+                        try:
+                            basic_issue = BasicViolation(
+                                rule_code=issue.get("rule_code", ""),
+                                rule_name=issue.get("rule_name", ""),
+                                issue_type=IssueType(issue.get("issue_type", IssueType.OTHER.value)),
+                                source_node=PipelineNode(issue.get("source_node", node.value)),
+                                description=issue.get("description", ""),
+                                severity=SeverityLevel(issue.get("severity", SeverityLevel.WARNING.value)),
+                                fragment_id=issue.get("fragment_id"),
+                                suggestion=issue.get("suggestion")
+                            )
+                            add_violation(basic_issue, node)
+                        except Exception as e:
+                            error(f"转换问题为 BasicViolation 失败: {e}")
+                            continue
+                    else:
+                        # 已经是对象，直接使用
+                        add_violation(issue, node)
+
+                info(f"合并阶段 {node.value} 的问题: {len(issues)}个")
+
+        if total_stage_issues > 0:
+            debug(f"总共合并各阶段问题: {total_stage_issues}个，去重后: {len(merged.violations)}个")
+
+        return merged
+
+    def _calculate_weighted_score(self, violations: List) -> float:
+        """
+        根据问题计算加权分数
+
+        Args:
+            violations: BasicViolation 对象列表或字典列表
+        """
+        base_score = 100.0
+
+        for violation in violations:
+            try:
+                # 处理字典类型
+                if isinstance(violation, dict):
+                    severity = violation.get("severity")
+                    # 如果 severity 是字典，可能包含 value 属性
+                    if hasattr(severity, 'value'):
+                        severity = severity.value
+                    elif isinstance(severity, dict):
+                        severity = severity.get("value", "warning")
+                    else:
+                        severity = str(severity) if severity else "warning"
+                else:
+                    # 处理 BasicViolation 对象
+                    severity = violation.severity
+                    if hasattr(severity, 'value'):
+                        severity = severity.value
+                    elif hasattr(severity, '__str__'):
+                        severity = str(severity)
+
+                # 获取权重
+                penalty = self.severity_weights.get(severity, 5)
+                base_score -= penalty
+
+            except Exception as e:
+                debug(f"计算分数时出错: {e}, violation类型: {type(violation)}")
+                base_score -= 5  # 默认扣5分
+
+        return max(0.0, min(100.0, base_score))
+
+    def _get_type_summary(self, issues: List[BasicViolation]) -> Dict[str, int]:
+        """获取问题类型摘要"""
+        summary = {}
+        for issue in issues:
+            if isinstance(issue, dict):
+                issue_type = issue.get("issue_type")
+                if isinstance(issue_type, dict):
+                    type_str = issue_type.get("value", "unknown")
+                elif isinstance(issue_type, str):
+                    type_str = issue_type
+                else:
+                    type_str = "unknown"
+            else:
+                type_str = issue.issue_type.value if issue.issue_type else "unknown"
+            summary[type_str] = summary.get(type_str, 0) + 1
+        return summary
+
+    def _collect_suggestions(self, issues: List) -> Dict[str, List[str]]:
+        """收集修复建议"""
+        suggestions = {}
+        for issue in issues:
+            fragment_id = getattr(issue, 'fragment_id', None)
+            suggestion = getattr(issue, 'suggestion', None)
+            if fragment_id and suggestion:
+                if fragment_id not in suggestions:
+                    suggestions[fragment_id] = []
+                if suggestion not in suggestions[fragment_id]:
+                    suggestions[fragment_id].append(suggestion)
+            elif suggestion:
+                # 全局建议
+                if "global" not in suggestions:
+                    suggestions["global"] = []
+                if suggestion not in suggestions["global"]:
+                    suggestions["global"].append(suggestion)
+        return suggestions
+
+    def _get_severity_summary(self, issues: List) -> Dict[str, int]:
+        """获取严重程度摘要"""
+        summary = {severity.value: 0 for severity in SeverityLevel}
+        for issue in issues:
+            # 判断 issue 是字典还是对象
+            if isinstance(issue, dict):
+                severity_value = issue.get("severity")
+                # 处理 severity 可能是字典或字符串的情况
+                if isinstance(severity_value, dict):
+                    severity_str = severity_value.get("value", "warning")
+                elif isinstance(severity_value, str):
+                    severity_str = severity_value
+                else:
+                    severity_str = "warning"
+            else:
+                # 对象类型
+                severity_value = issue.severity
+                if hasattr(severity_value, 'value'):
+                    severity_str = severity_value.value
+                else:
+                    severity_str = str(severity_value) if severity_value else "warning"
+
+            summary[severity_str] = summary.get(severity_str, 0) + 1
+        return summary
+
+    def _post_process_report(self, report: QualityAuditReport) -> QualityAuditReport:
+        """后处理报告"""
+        # 计算统计信息
+        severity_counts = {severity.value: 0 for severity in SeverityLevel}
+        for violation in report.violations:
+            severity = violation.severity
+            severity_str = severity.value if hasattr(severity, 'value') else str(severity)
+            severity_counts[severity_str] = severity_counts.get(severity_str, 0) + 1
+
+        report.stats.update({
+            "total_violations": len(report.violations),
+            SeverityLevel.INFO.value: severity_counts.get(SeverityLevel.INFO.value, 0),
+            SeverityLevel.WARNING.value: severity_counts.get(SeverityLevel.WARNING.value, 0),
+            SeverityLevel.MODERATE.value: severity_counts.get(SeverityLevel.MODERATE.value, 0),
+            SeverityLevel.MAJOR.value: severity_counts.get(SeverityLevel.MAJOR.value, 0),
+            SeverityLevel.CRITICAL.value: severity_counts.get(SeverityLevel.CRITICAL.value, 0),
+            SeverityLevel.ERROR.value: severity_counts.get(SeverityLevel.ERROR.value, 0),
+        })
+
+        # 计算质量分数
+        base_score = 100.0
+        for violation in report.violations:
+            severity = violation.severity
+            severity_str = severity.value if hasattr(severity, 'value') else str(severity)
+            penalty = self.severity_weights.get(severity_str, 5)
+            base_score -= penalty
+        report.score = max(0.0, min(100.0, base_score))
+
+        # 确定最终状态
+        error_count = severity_counts.get(SeverityLevel.ERROR.value, 0)
+        critical_count = severity_counts.get(SeverityLevel.CRITICAL.value, 0)
+        major_count = severity_counts.get(SeverityLevel.MAJOR.value, 0)
+        moderate_count = severity_counts.get(SeverityLevel.MODERATE.value, 0)
+        warning_count = severity_counts.get(SeverityLevel.WARNING.value, 0)
+
+        if error_count > 0:
+            report.status = AuditStatus.FAILED
+        elif critical_count > 0:
+            report.status = AuditStatus.CRITICAL_ISSUES
+        elif major_count > 0:
+            report.status = AuditStatus.MAJOR_ISSUES
+        elif moderate_count > 0:
+            report.status = AuditStatus.MODERATE_ISSUES
+        elif warning_count > 0:
+            report.status = AuditStatus.MINOR_ISSUES
+        else:
+            report.status = AuditStatus.PASSED
+
+        report.conclusion = self._generate_conclusion(report)
+
+        return report
+
+    def _generate_conclusion(self, report: QualityAuditReport) -> str:
+        """生成结论"""
+        if report.status == AuditStatus.PASSED:
+            return "审查通过，可以开始视频生成"
+
+        issues_summary = []
+        if report.stats.get(SeverityLevel.ERROR.value, 0) > 0:
+            issues_summary.append(f"{report.stats[SeverityLevel.ERROR.value]}个错误")
+        if report.stats.get(SeverityLevel.CRITICAL.value, 0) > 0:
+            issues_summary.append(f"{report.stats[SeverityLevel.CRITICAL.value]}个严重问题")
+        if report.stats.get(SeverityLevel.MAJOR.value, 0) > 0:
+            issues_summary.append(f"{report.stats[SeverityLevel.MAJOR.value]}个主要问题")
+        if report.stats.get(SeverityLevel.MODERATE.value, 0) > 0:
+            issues_summary.append(f"{report.stats[SeverityLevel.MODERATE.value]}个中度问题")
+        if report.stats.get(SeverityLevel.WARNING.value, 0) > 0:
+            issues_summary.append(f"{report.stats[SeverityLevel.WARNING.value]}个警告")
+
+        if issues_summary:
+            return f"发现{', '.join(issues_summary)}，请根据建议修复"
+
+        if report.score < 60:
+            return f"质量分数较低({report.score:.1f}%)，建议修复后重试"
+
+        return f"发现{len(report.violations)}个问题，质量分数:{report.score:.1f}%"
+
+    def _create_fallback_report(self, instructions: AIVideoInstructions) -> QualityAuditReport:
+        """创建回退报告"""
+        fragment_count = len(instructions.fragments)
+
+        return QualityAuditReport(
+            project_info={
+                "title": instructions.project_info.get("title", "未命名项目"),
+                "fragment_count": fragment_count,
+                "total_duration": instructions.project_info.get("total_duration", 0.0)
+            },
+            status=AuditStatus.FAILED,
+            checks=[],
+            violations=[],
+            stats={SeverityLevel.ERROR.value: 1},
+            score=0.0,
+            conclusion="质量审查失败，请检查系统状态后重试"
+        )
 
     def _enhance_report(self, report: QualityAuditReport,
                         instructions: AIVideoInstructions,
                         stage_issues: Dict[PipelineNode, List[BasicViolation]],
                         historical_context: Optional[Dict[str, Any]] = None) -> QualityAuditReport:
         """增强报告：添加问题分类和修复参数"""
-
         # 初始化分类
         issues_by_source = {
             PipelineNode.PARSE_SCRIPT: [],
@@ -257,33 +661,55 @@ class QualityAuditorAgent:
             repair_params: 当前修复参数
             successful_patterns: 历史成功修复模式列表
         """
-        if not successful_patterns:
-            return
 
-        debug(f"使用 {len(successful_patterns)} 条历史成功模式优化修复建议")
+        # 1. 使用传入的历史模式
+        if successful_patterns:
+            debug(f"使用 {len(successful_patterns)} 条历史成功模式优化修复建议")
 
-        # 分析成功模式中的问题类型频率
-        pattern_issue_counts = {}
-        for pattern in successful_patterns:
-            if isinstance(pattern, dict):
-                issue_types = pattern.get("issue_types", [])
-                for issue_type in issue_types:
-                    pattern_issue_counts[issue_type] = pattern_issue_counts.get(issue_type, 0) + 1
+            # 分析成功模式中的问题类型频率
+            pattern_issue_counts = {}
+            for pattern in successful_patterns:
+                if isinstance(pattern, dict):
+                    issue_types = pattern.get("issue_types", [])
+                    for issue_type in issue_types:
+                        pattern_issue_counts[issue_type] = pattern_issue_counts.get(issue_type, 0) + 1
 
-        # 对于高频问题，增加修复优先级
-        high_freq_issues = {t: c for t, c in pattern_issue_counts.items() if c > 2}
-        if high_freq_issues:
-            debug(f"高频问题模式: {high_freq_issues}")
+            # 对于高频问题，增加修复优先级
+            high_freq_issues = {t: c for t, c in pattern_issue_counts.items() if c > 2}
+            if high_freq_issues:
+                debug(f"高频问题模式: {high_freq_issues}")
 
-            # 为高频问题添加额外建议
-            for source, params in repair_params.items():
-                for issue_type in params.issue_types:
-                    if issue_type in high_freq_issues:
-                        if "global" not in params.suggestions:
-                            params.suggestions["global"] = []
-                        params.suggestions["global"].append(
-                            f"根据历史经验，此问题频繁出现，建议优先修复（出现{high_freq_issues[issue_type]}次）"
-                        )
+                # 为高频问题添加额外建议
+                for source, params in repair_params.items():
+                    for issue_type in params.issue_types:
+                        if issue_type in high_freq_issues:
+                            if "global" not in params.suggestions:
+                                params.suggestions["global"] = []
+                            # 去重添加
+                            hint = f"根据历史经验，此问题频繁出现，建议优先修复（出现{high_freq_issues[issue_type]}次）"
+                            if hint not in params.suggestions["global"]:
+                                params.suggestions["global"].append(hint)
+
+        else:
+            # 2. 使用本地修复历史
+            local_patterns = self.get_repair_patterns()
+            if local_patterns and local_patterns.get("by_stage"):
+                debug(f"使用本地修复历史: {local_patterns.get('total_repairs', 0)}条记录")
+
+                for stage_name, stats in local_patterns.get("by_stage", {}).items():
+                    high_freq_issues = stats.get("common_issues", {})
+                    if high_freq_issues:
+                        # 找到对应阶段的修复参数
+                        for source, params in repair_params.items():
+                            if source == stage_name or stage_name in source:
+                                if "global" not in params.suggestions:
+                                    params.suggestions["global"] = []
+
+                                for issue, count in high_freq_issues.items():
+                                    hint = f"根据历史记录，{issue}已成功修复{count}次"
+                                    if hint not in params.suggestions["global"]:
+                                        params.suggestions["global"].append(hint)
+
 
     def _adjust_severity_with_history(self, repair_params: Dict, historical_results: List):
         """
@@ -322,251 +748,9 @@ class QualityAuditorAgent:
                         # 添加高优先级标记
                         if "global" not in params.suggestions:
                             params.suggestions["global"] = []
-                        params.suggestions["global"].append(
-                            f"此问题历史中曾导致失败，建议优先修复"
-                        )
-
-    def _merge_reports(self, rule_report: QualityAuditReport,
-                       llm_report: Optional[QualityAuditReport],
-                       instructions: AIVideoInstructions,
-                       stage_issues: Dict[PipelineNode, List[BasicViolation]]) -> QualityAuditReport:
-        """合并基本规则、LLM审查报告和各阶段问题"""
-
-        # 创建合并报告（基于规则报告）
-        merged = QualityAuditReport(
-            project_info=instructions.project_info,
-            checks=rule_report.checks.copy(),
-            violations=rule_report.violations.copy(),
-            stats=rule_report.stats.copy()
-        )
-
-        # 1. 合并LLM报告的问题
-        if llm_report:
-            for violation in llm_report.violations:
-                merged.violations.append(violation)
-
-            for check in llm_report.checks:
-                merged.checks.append(check)
-
-        # 2. 合并各阶段检测到的问题
-        total_stage_issues = 0
-        for node, issues in stage_issues.items():
-            if issues:
-                total_stage_issues += len(issues)
-                for issue in issues:
-                    # 确保 issue 是 BasicViolation 对象
-                    if isinstance(issue, dict):
-                        # 如果是字典，转换为 BasicViolation 对象
-                        try:
-                            basic_issue = BasicViolation(
-                                rule_code=issue.get("rule_code", ""),
-                                rule_name=issue.get("rule_name", ""),
-                                issue_type=IssueType(issue.get("issue_type", IssueType.OTHER.value)),
-                                source_node=PipelineNode(issue.get("source_node", node.value)),
-                                description=issue.get("description", ""),
-                                severity=SeverityLevel(issue.get("severity", SeverityLevel.WARNING.value)),
-                                fragment_id=issue.get("fragment_id"),
-                                suggestion=issue.get("suggestion")
-                            )
-                            # 设置来源节点
-                            if not hasattr(basic_issue, 'source_node') or not basic_issue.source_node:
-                                basic_issue.source_node = node
-                            merged.violations.append(basic_issue)
-                        except Exception as e:
-                            error(f"转换问题为 BasicViolation 失败: {e}")
-                            print_log_exception()
-                            continue
-                    else:
-                        # 已经是对象，直接使用
-                        if not hasattr(issue, 'source_node') or not issue.source_node:
-                            issue.source_node = node
-                        merged.violations.append(issue)
-
-                info(f"合并阶段 {node.value} 的问题: {len(issues)}个")
-
-        if total_stage_issues > 0:
-            debug(f"总共合并各阶段问题: {total_stage_issues}个")
-            # 重新计算分数
-            merged.score = self._calculate_weighted_score(merged.violations)
-
-        return merged
-
-    def _calculate_weighted_score(self, violations: List) -> float:
-        """
-        根据问题计算加权分数
-
-        Args:
-            violations: BasicViolation 对象列表或字典列表
-        """
-        base_score = 100.0
-
-        for violation in violations:
-            try:
-                # 处理字典类型
-                if isinstance(violation, dict):
-                    severity = violation.get("severity")
-                    # 如果 severity 是字典，可能包含 value 属性
-                    if hasattr(severity, 'value'):
-                        severity = severity.value
-                    elif isinstance(severity, dict):
-                        severity = severity.get("value", "warning")
-                    else:
-                        severity = str(severity) if severity else "warning"
-                else:
-                    # 处理 BasicViolation 对象
-                    severity = violation.severity
-                    if hasattr(severity, 'value'):
-                        severity = severity.value
-                    elif hasattr(severity, '__str__'):
-                        severity = str(severity)
-
-                # 获取权重
-                penalty = self.severity_weights.get(severity, 5)
-                base_score -= penalty
-
-            except Exception as e:
-                debug(f"计算分数时出错: {e}, violation类型: {type(violation)}")
-                base_score -= 5  # 默认扣5分
-
-        return max(0.0, min(100.0, base_score))
-
-    def _get_type_summary(self, issues: List[BasicViolation]) -> Dict[str, int]:
-        """获取问题类型摘要"""
-        summary = {}
-        for issue in issues:
-            if isinstance(issue, dict):
-                issue_type = issue.get("issue_type")
-                if isinstance(issue_type, dict):
-                    type_str = issue_type.get("value", "unknown")
-                elif isinstance(issue_type, str):
-                    type_str = issue_type
-                else:
-                    type_str = "unknown"
-            else:
-                type_str = issue.issue_type.value if issue.issue_type else "unknown"
-            summary[type_str] = summary.get(type_str, 0) + 1
-        return summary
-
-
-    def _collect_suggestions(self, issues: List) -> Dict[str, List[str]]:
-        """收集修复建议"""
-        suggestions = {}
-        for issue in issues:
-            if issue.fragment_id and issue.suggestion:
-                if issue.fragment_id not in suggestions:
-                    suggestions[issue.fragment_id] = []
-                suggestions[issue.fragment_id].append(issue.suggestion)
-            elif issue.suggestion:
-                # 全局建议
-                if "global" not in suggestions:
-                    suggestions["global"] = []
-                suggestions["global"].append(issue.suggestion)
-        return suggestions
-
-    def _get_severity_summary(self, issues: List) -> Dict[str, int]:
-        """获取严重程度摘要"""
-        summary = {severity.value: 0 for severity in SeverityLevel}
-        for issue in issues:
-            # 判断 issue 是字典还是对象
-            if isinstance(issue, dict):
-                severity_value = issue.get("severity")
-                # 处理 severity 可能是字典或字符串的情况
-                if isinstance(severity_value, dict):
-                    severity_str = severity_value.get("value", "warning")
-                elif isinstance(severity_value, str):
-                    severity_str = severity_value
-                else:
-                    severity_str = "warning"
-            else:
-                # 对象类型
-                severity_value = issue.severity
-                if hasattr(severity_value, 'value'):
-                    severity_str = severity_value.value
-                else:
-                    severity_str = str(severity_value) if severity_value else "warning"
-
-            summary[severity_str] = summary.get(severity_str, 0) + 1
-        return summary
-
-    def _post_process_report(self, report: QualityAuditReport) -> QualityAuditReport:
-        """后处理报告"""
-        # 计算统计信息
-        severity_counts = {severity.value: 0 for severity in SeverityLevel}
-        for violation in report.violations:
-            severity_counts[violation.severity.value] += 1
-
-        report.stats.update({
-            "total_violations": len(report.violations),
-            SeverityLevel.INFO.value: severity_counts[SeverityLevel.INFO.value],
-            SeverityLevel.WARNING.value: severity_counts[SeverityLevel.WARNING.value],
-            SeverityLevel.MODERATE.value: severity_counts[SeverityLevel.MODERATE.value],
-            SeverityLevel.MAJOR.value: severity_counts[SeverityLevel.MAJOR.value],
-            SeverityLevel.CRITICAL.value: severity_counts[SeverityLevel.CRITICAL.value],
-            SeverityLevel.ERROR.value: severity_counts[SeverityLevel.ERROR.value],
-        })
-
-        # 计算质量分数
-        base_score = 100.0
-        for violation in report.violations:
-            penalty = self.severity_weights.get(violation.severity, 5)
-            base_score -= penalty
-        report.score = max(0.0, min(100.0, base_score))
-
-        # 确定最终状态
-        if severity_counts[SeverityLevel.ERROR.value] > 0:
-            report.status = AuditStatus.FAILED
-        elif severity_counts[SeverityLevel.CRITICAL.value] > 0:
-            report.status = AuditStatus.CRITICAL_ISSUES
-        elif severity_counts[SeverityLevel.MAJOR.value] > 0:
-            report.status = AuditStatus.MAJOR_ISSUES
-        elif severity_counts[SeverityLevel.MODERATE.value] > 0:
-            report.status = AuditStatus.MODERATE_ISSUES
-        elif severity_counts[SeverityLevel.WARNING.value] > 0:
-            report.status = AuditStatus.MINOR_ISSUES
-        else:
-            report.status = AuditStatus.PASSED
-
-        report.conclusion = self._generate_conclusion(report)
-
-        return report
-
-    def _generate_conclusion(self, report: QualityAuditReport) -> str:
-        """生成结论"""
-        if report.status == AuditStatus.PASSED:
-            return "审查通过，可以开始视频生成"
-
-        issues_summary = []
-        if report.stats.get(SeverityLevel.ERROR.value, 0) > 0:
-            issues_summary.append(f"{report.stats[SeverityLevel.ERROR.value]}个错误")
-        if report.stats.get(SeverityLevel.CRITICAL.value, 0) > 0:
-            issues_summary.append(f"{report.stats[SeverityLevel.CRITICAL.value]}个严重问题")
-        if report.stats.get(SeverityLevel.MAJOR.value, 0) > 0:
-            issues_summary.append(f"{report.stats[SeverityLevel.MAJOR.value]}个主要问题")
-        if report.stats.get(SeverityLevel.MODERATE.value, 0) > 0:
-            issues_summary.append(f"{report.stats[SeverityLevel.MODERATE.value]}个中度问题")
-        if report.stats.get(SeverityLevel.WARNING.value, 0) > 0:
-            issues_summary.append(f"{report.stats[SeverityLevel.WARNING.value]}个警告")
-
-        if issues_summary:
-            return f"发现{', '.join(issues_summary)}，请根据建议修复"
-        return "审查完成"
-
-    def _create_fallback_report(self, instructions: AIVideoInstructions) -> QualityAuditReport:
-        """创建回退报告"""
-        fragment_count = len(instructions.fragments)
-
-        return QualityAuditReport(
-            project_info={
-                "title": instructions.project_info.get("title", "未命名项目"),
-                "fragment_count": fragment_count,
-                "total_duration": instructions.project_info.get("total_duration", 0.0)
-            },
-            status=AuditStatus.FAILED,
-            checks=[],
-            violations=[],
-            stats={SeverityLevel.ERROR.value: fragment_count},
-            score=0.0
-        )
+                        hint = f"此问题历史中曾导致失败，建议优先修复"
+                        if hint not in params.suggestions["global"]:
+                            params.suggestions["global"].append(hint)
 
     def _get_issue_type(self, violation) -> IssueType:
         """获取问题类型"""

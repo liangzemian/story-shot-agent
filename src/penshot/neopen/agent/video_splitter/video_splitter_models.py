@@ -104,3 +104,30 @@ class FragmentSequence(BaseModel):
 
     def to_dict(self):
         return self.model_dump()
+
+    def update_stats(self):
+        """更新统计信息"""
+        fragments = self.fragments
+        fragment_count = len(fragments)
+
+        if fragment_count == 0:
+            return
+
+        total_duration = sum(f.duration for f in fragments)
+
+        # 统计分割情况
+        split_shots = set()
+        for f in fragments:
+            if hasattr(f, 'metadata') and f.metadata:
+                original_shot = f.metadata.get('original_shot')
+                if original_shot and f.metadata.get('is_split', False):
+                    split_shots.add(original_shot)
+
+        self.stats = {
+            "fragment_count": fragment_count,
+            "total_duration": total_duration,
+            "avg_duration": round(total_duration / fragment_count, 2),
+            "fragments_under_5s": sum(1 for f in fragments if f.duration <= 5.0),
+            "fragments_split": len(split_shots),  # 实际被分割的镜头数
+            "split_ratio": round(len(split_shots) / self.source_info.get("shot_count", 1), 2) if self.source_info.get("shot_count", 0) > 0 else 0
+        }

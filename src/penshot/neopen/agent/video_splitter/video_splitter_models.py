@@ -96,9 +96,9 @@ class FragmentSequence(BaseModel):
             "fragment_count": 0,
             "total_duration": 0.0,
             "avg_duration": 0.0,
-            "fragments_under_5s": 0,  # 原始镜头≤5秒的数量
-            "fragments_split": 0,  # 被拆分的镜头数量
-            "split_ratio": 0.0  # 拆分比例
+            "fragments_under_5s": 0,
+            "fragments_split": 0,
+            "split_ratio": 0.0
         }
     )
 
@@ -106,7 +106,7 @@ class FragmentSequence(BaseModel):
         return self.model_dump()
 
     def update_stats(self):
-        """更新统计信息"""
+        """更新统计信息 - 修复版，使用 actual_split_shots"""
         fragments = self.fragments
         fragment_count = len(fragments)
 
@@ -114,8 +114,9 @@ class FragmentSequence(BaseModel):
             return
 
         total_duration = sum(f.duration for f in fragments)
+        shot_count = self.source_info.get("shot_count", 1)
 
-        # 统计分割情况
+        # 统计实际被分割的镜头数
         split_shots = set()
         for f in fragments:
             if hasattr(f, 'metadata') and f.metadata:
@@ -123,11 +124,13 @@ class FragmentSequence(BaseModel):
                 if original_shot and f.metadata.get('is_split', False):
                     split_shots.add(original_shot)
 
+        actual_split_shots = len(split_shots)
+
         self.stats = {
             "fragment_count": fragment_count,
             "total_duration": total_duration,
             "avg_duration": round(total_duration / fragment_count, 2),
             "fragments_under_5s": sum(1 for f in fragments if f.duration <= 5.0),
-            "fragments_split": len(split_shots),  # 实际被分割的镜头数
-            "split_ratio": round(len(split_shots) / self.source_info.get("shot_count", 1), 2) if self.source_info.get("shot_count", 0) > 0 else 0
+            "fragments_split": actual_split_shots,
+            "split_ratio": round(actual_split_shots / shot_count, 2) if shot_count > 0 else 0
         }

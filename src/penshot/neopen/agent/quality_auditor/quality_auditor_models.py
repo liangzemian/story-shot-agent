@@ -451,23 +451,20 @@ class QualityAuditReport(BaseModel):
 
         return max(0.0, min(100.0, base_score))
 
-    def determine_status_from_score(self, score: float = None) -> 'AuditStatus':
+    def determine_status_from_score(self) -> 'AuditStatus':
         """根据分数确定状态"""
-        if score is None:
-            score = self.score or self.calculate_weighted_score()
-
-        if self._has_severity(SeverityLevel.ERROR):
-            return AuditStatus.FAILED
-        elif self._has_severity(SeverityLevel.CRITICAL):
-            return AuditStatus.CRITICAL_ISSUES
-        elif self._has_severity(SeverityLevel.MAJOR):
-            return AuditStatus.MAJOR_ISSUES
-        elif self._has_severity(SeverityLevel.MODERATE):
-            return AuditStatus.MODERATE_ISSUES
-        elif self._has_severity(SeverityLevel.WARNING):
-            return AuditStatus.MINOR_ISSUES
-        else:
+        if self.score >= 90:
             return AuditStatus.PASSED
+        elif self.score >= 75:
+            return AuditStatus.MINOR_ISSUES
+        elif self.score >= 60:
+            return AuditStatus.MODERATE_ISSUES
+        elif self.score >= 40:
+            return AuditStatus.MAJOR_ISSUES
+        elif self.score >= 20:
+            return AuditStatus.CRITICAL_ISSUES
+        else:
+            return AuditStatus.FAILED
 
     def _has_severity(self, severity: SeverityLevel) -> bool:
         """检查是否存在指定严重程度的问题"""

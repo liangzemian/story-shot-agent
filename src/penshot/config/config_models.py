@@ -113,7 +113,8 @@ class AppConfig(BaseModel):
     description: str = Field(default="脚本转分镜AI助手")
     environment: Literal["development", "production"] = Field(default="development")
     language: Literal["zh", "en"] = Field(default="zh")
-    hf_endpoint: str = Field(default="https://huggingface.co")
+    hf_endpoint: str = Field(default="https://hf-mirror.com")
+    hf_token: Optional[str] = Field(default=None)
 
 
 class StoryboardGenerationConfig(BaseModel):
@@ -163,4 +164,4 @@ class PathsConfig(BaseModel):
     data_memory: str = Field(default="data/memory")
     data_embedding: str = Field(default="data/embedding")
     data_template: str = Field(default="data/template")
-    model_cache: str = Field(default="data/models")
+    data_model: str = Field(default="data/models")

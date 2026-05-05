@@ -1,20 +1,23 @@
 """
 @FileName: prompt_template_manager.py
-@Description: 提示词模板管理器 - 负责成功提示词模板的存储、检索和应用
+@Description: 提示词模板管理器 - 负责成功提示词模板的存储、检索和应用，支持剧本ID数据隔离
 @Author: HiPeng
 @Github: https://github.com/neopen/story-shot-agent
-@Time: 2026/04/23
+@Time: 2026/05/05
 """
 
+import hashlib
+import json
 import os
+import shutil
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 from llama_index.core import VectorStoreIndex, Document, load_index_from_storage
+from llama_index.core.indices.base import BaseIndex
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.storage import StorageContext
 
-from penshot.config.config import settings
 from penshot.logger import debug, info, error, warning
 from penshot.neopen.knowledge.llamaIndex.llama_index_knowledge import ScriptKnowledgeBase
 from penshot.neopen.knowledge.memory.memory_manager import MemoryManager
@@ -26,21 +29,28 @@ class PromptTemplateManager:
     提示词模板管理器
 
     职责：
-    1. 存储成功的提示词模板到向量数据库
-    2. 检索相似提示词模板
+    1. 存储成功的提示词模板到向量数据库（支持按剧本ID隔离）
+    2. 检索相似提示词模板（支持跨剧本和剧本内检索）
     3. 应用模板增强当前提示词
     4. 与记忆层同步
+
+    数据隔离策略：
+    - 每个剧本有独立的索引存储目录
+    - 支持跨剧本检索（全局模板）和剧本内检索
+    - 缓存区分剧本ID
     """
 
     def __init__(
             self,
             embedding_model,
+            storage_dir: str = "data/embedding",
             memory_manager: Optional[MemoryManager] = None,
-            storage_dir: Optional[str] = settings.get_data_paths().get('data_embedding'),
             chunk_size: int = 512,
             chunk_overlap: int = 20,
             min_similarity_score: float = 0.5,
-            top_k: int = 3
+            top_k: int = 3,
+            max_cache_size: int = 200,
+            max_metadata_length: int = 256
     ):
         """
         初始化提示词模板管理器
@@ -48,23 +58,31 @@ class PromptTemplateManager:
         Args:
             embedding_model: 嵌入模型
             memory_manager: 记忆管理器（用于加载历史成功模板）
-            storage_dir: 存储目录
+            storage_dir: 基础存储目录
             chunk_size: 文本块大小
             chunk_overlap: 文本块重叠大小
             min_similarity_score: 最低相似度分数
             top_k: 检索返回数量
+            max_cache_size: 最大缓存数量
+            max_metadata_length: 元数据最大长度（避免块大小警告）
         """
         self.embedding_model = embedding_model
         self.memory_manager = memory_manager
-        self.storage_dir = storage_dir
+        self.base_storage_dir = storage_dir
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.min_similarity_score = min_similarity_score
         self.top_k = top_k
+        self.max_cache_size = max_cache_size
+        self.max_metadata_length = max_metadata_length
 
-        # 索引相关
-        self.index = None
-        self._templates_cache: List[Dict] = []
+        # 当前剧本ID（用于数据隔离）
+        self._current_script_id: Optional[str] = None
+
+        # 按剧本ID管理的索引和缓存
+        self._indices: Dict[str, Optional[BaseIndex]] = {}
+        self._caches: Dict[str, List[Dict[str, Any]]] = {}
+        self._cache_loaded: Set[str] = set()
 
         # 节点解析器
         self.node_parser = SentenceSplitter(
@@ -72,247 +90,340 @@ class PromptTemplateManager:
             chunk_overlap=chunk_overlap
         )
 
-        # 初始化
-        self._init()
+        # 递归保护栈
+        self._processing_stack: Set[str] = set()
 
         # 剧本知识库（用于连续性检查等）
         self.script_kb = None
         self._init_script_kb()
 
-    def _init(self):
-        """初始化管理器"""
-        if self.storage_dir:
-            os.makedirs(self.storage_dir, exist_ok=True)
+        debug(f"提示词模板管理器初始化完成，存储目录: {self.base_storage_dir}")
 
-        # 先加载缓存
-        self._load_cache()
+    def set_current_script(self, script_id: str) -> None:
+        """
+        设置当前剧本ID，用于数据隔离
 
-        # 尝试加载索引
-        self._load_index()
-
-        # 如果缓存有数据但索引不存在，从缓存重建索引
-        if self._templates_cache and not self.index:
-            self._rebuild_index_from_cache()
-            self._save_index()  # 保存重建的索引
-
-        # 如果缓存为空但索引存在，从索引重建缓存
-        if not self._templates_cache and self.index:
-            self._rebuild_cache_from_index()
-
-        # 从记忆层加载历史模板（如果仍然没有数据）
-        if not self._templates_cache:
-            self._load_from_memory()
-
-        info(f"提示词模板管理器初始化完成，当前模板数: {len(self._templates_cache)}")
-
-    def _rebuild_index_from_cache(self):
-        """从缓存重建索引"""
-        if not self._templates_cache:
+        Args:
+            script_id: 剧本ID
+        """
+        if not script_id:
+            warning("尝试设置空的剧本ID，已忽略")
             return
 
-        try:
-            documents = []
-            for item in self._templates_cache:
-                doc = Document(
-                    text=item["prompt"],
-                    metadata={
-                        "type": "prompt_template",
-                        "prompt": item["prompt"],
-                        "timestamp": item.get("added_at", datetime.now().isoformat()),
-                        **item.get("metadata", {})
-                    }
-                )
-                documents.append(doc)
+        self._current_script_id = script_id
 
-            self.index = VectorStoreIndex.from_documents(
+        # 确保该剧本的缓存已加载
+        if script_id not in self._cache_loaded:
+            self._load_cache_for_script(script_id)
+            self._load_index_for_script(script_id)
+
+        info(f"切换到剧本: {script_id}, 模板数: {len(self._caches.get(script_id, []))}")
+
+    def _get_script_storage_dir(self, script_id: str) -> str:
+        """
+        获取指定剧本的存储目录
+
+        Args:
+            script_id: 剧本ID
+
+        Returns:
+            存储目录路径
+        """
+        # 使用剧本ID的哈希作为子目录名，避免特殊字符问题
+        # safe_name = hashlib.md5(script_id.encode('utf-8')).hexdigest()[:16]
+        # script_dir = os.path.join(self.base_storage_dir, "prompt_templates", safe_name)
+        script_dir = os.path.join(self.base_storage_dir, "prompt_templates", script_id)
+        os.makedirs(script_dir, exist_ok=True)
+        return script_dir
+
+    def _get_cache_path(self, script_id: str) -> str:
+        """
+        获取缓存文件路径
+
+        Args:
+            script_id: 剧本ID
+
+        Returns:
+            缓存文件路径
+        """
+        script_dir = self._get_script_storage_dir(script_id)
+        return os.path.join(script_dir, "templates_cache.json")
+
+    def _get_index_dir(self, script_id: str) -> str:
+        """
+        获取索引目录路径
+
+        Args:
+            script_id: 剧本ID
+
+        Returns:
+            索引目录路径
+        """
+        script_dir = self._get_script_storage_dir(script_id)
+        return os.path.join(script_dir, "index_store")
+
+    def _load_cache_for_script(self, script_id: str) -> None:
+        """
+        加载指定剧本的缓存
+
+        Args:
+            script_id: 剧本ID
+        """
+        if script_id in self._cache_loaded:
+            return
+
+        cache_path = self._get_cache_path(script_id)
+
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    if isinstance(cache_data, list):
+                        self._caches[script_id] = cache_data
+                    else:
+                        self._caches[script_id] = []
+                    info(f"已加载剧本 {script_id} 的缓存，共 {len(self._caches[script_id])} 个模板")
+            except Exception as e:
+                warning(f"加载缓存失败: {cache_path}, {e}")
+                self._caches[script_id] = []
+        else:
+            self._caches[script_id] = []
+
+        self._cache_loaded.add(script_id)
+
+    def _save_cache_for_script(self, script_id: str) -> None:
+        """
+        保存指定剧本的缓存
+
+        Args:
+            script_id: 剧本ID
+        """
+        if script_id not in self._caches:
+            return
+
+        cache_path = self._get_cache_path(script_id)
+
+        try:
+            if len(self._caches[script_id]) > self.max_cache_size:
+                self._caches[script_id] = self._caches[script_id][-self.max_cache_size:]
+
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(self._caches[script_id], f, ensure_ascii=False, indent=2)
+            debug(f"已保存剧本 {script_id} 的缓存")
+        except Exception as e:
+            warning(f"保存缓存失败: {cache_path}, {e}")
+
+    def _load_index_for_script(self, script_id: str) -> None:
+        """
+        加载指定剧本的索引
+
+        注意：load_index_from_storage 的正确签名是：
+        def load_index_from_storage(
+            storage_context: StorageContext,
+            index_id: Optional[str] = None,
+            **kwargs: Any,
+        ) -> BaseIndex
+
+        Args:
+            script_id: 剧本ID
+        """
+        index_dir = self._get_index_dir(script_id)
+
+        if os.path.exists(index_dir):
+            try:
+                # 检查目录是否包含有效的索引文件
+                vector_store_path = os.path.join(index_dir, "vector_store.json")
+                if not os.path.exists(vector_store_path):
+                    debug(f"索引目录缺少 vector_store.json，将创建新索引: {index_dir}")
+                    self._indices[script_id] = None
+                    return
+
+                # 创建存储上下文
+                storage_context = StorageContext.from_defaults(persist_dir=index_dir)
+
+                # 使用正确的签名加载索引
+                # load_index_from_storage 接受 storage_context 作为第一个参数
+                # index_id 参数用于指定特定的索引ID（如有多个索引）
+                self._indices[script_id] = load_index_from_storage(
+                    storage_context=storage_context,
+                    index_id=None  # 使用默认索引ID
+                )
+                info(f"已加载剧本 {script_id} 的索引")
+            except Exception as e:
+                warning(f"加载索引失败: {index_dir}, {e}")
+                self._indices[script_id] = None
+        else:
+            self._indices[script_id] = None
+            debug(f"索引目录不存在，将创建新索引: {index_dir}")
+
+    def _save_index_for_script(self, script_id: str) -> None:
+        """
+        保存指定剧本的索引
+
+        Args:
+            script_id: 剧本ID
+        """
+        index = self._indices.get(script_id)
+        if not index:
+            return
+
+        index_dir = self._get_index_dir(script_id)
+
+        try:
+            os.makedirs(index_dir, exist_ok=True)
+            index.storage_context.persist(persist_dir=index_dir)
+            debug(f"已保存剧本 {script_id} 的索引")
+        except Exception as e:
+            warning(f"保存索引失败: {index_dir}, {e}")
+
+    def _create_index_for_script(self, script_id: str, documents: List[Document]) -> bool:
+        """
+        为剧本创建新索引
+
+        Args:
+            script_id: 剧本ID
+            documents: 文档列表
+
+        Returns:
+            是否创建成功
+        """
+        if not documents:
+            self._indices[script_id] = None
+            return False
+
+        try:
+            # 创建索引时需要指定 embed_model
+            self._indices[script_id] = VectorStoreIndex.from_documents(
                 documents,
                 embed_model=self.embedding_model,
                 transformations=[self.node_parser]
             )
-            info(f"从缓存重建索引，共 {len(documents)} 个模板")
+            self._save_index_for_script(script_id)
+            info(f"为剧本 {script_id} 创建索引，共 {len(documents)} 个模板")
+            return True
         except Exception as e:
-            error(f"重建索引失败: {e}")
+            error(f"创建索引失败: {script_id}, {e}")
+            self._indices[script_id] = None
+            return False
 
-
-    def _save_index(self):
-        """保存索引（包含文档存储）"""
-        if not self.storage_dir or not self.index:
-            return
-
-        try:
-            # 保存完整的存储上下文（包含文档存储和向量存储）
-            persist_dir = os.path.join(self.storage_dir, "index_store")
-            os.makedirs(persist_dir, exist_ok=True)
-
-            # 使用 persist 方法保存整个存储上下文
-            self.index.storage_context.persist(persist_dir=persist_dir)
-            debug(f"已保存完整索引到: {persist_dir}")
-        except Exception as e:
-            warning(f"保存索引失败: {e}")
-
-    def _load_index(self):
-        """加载已有索引（完整加载）"""
-        if not self.storage_dir:
-            return
-
-        try:
-            persist_dir = os.path.join(self.storage_dir, "index_store")
-            if os.path.exists(persist_dir):
-                # 从持久化目录加载
-                storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
-
-                # 使用 load_index_from_storage 加载索引
-                # 重要：必须传入 embed_model，否则会使用默认的 MockEmbedding [citation:7]
-                self.index = load_index_from_storage(
-                    storage_context=storage_context,
-                    embed_model=self.embedding_model
-                )
-                info(f"已加载完整索引: {persist_dir}")
-
-                # 重建缓存
-                self._rebuild_cache_from_index()
-            else:
-                debug(f"索引目录不存在，将创建新索引: {persist_dir}")
-        except Exception as e:
-            warning(f"加载索引失败: {e}")
-
-    def _rebuild_cache_from_index(self):
-        """从索引重建缓存（当缓存文件丢失但索引存在时使用）"""
-        if not self.index:
-            return
-
-        try:
-            # 更可靠的方式：直接从 docstore 获取文档
-            docstore = self.index.storage_context.docstore
-
-            # 获取所有文档ID
-            all_doc_ids = list(docstore.docs.keys())
-
-            self._templates_cache = []
-            for doc_id in all_doc_ids:
-                doc = docstore.get_document(doc_id)
-                if doc.metadata.get("type") == "prompt_template":
-                    self._templates_cache.append({
-                        "prompt": doc.text,
-                        "metadata": doc.metadata,
-                        "added_at": doc.metadata.get("timestamp", datetime.now().isoformat())
-                    })
-
-            # 保存重建的缓存
-            self._save_cache()
-
-            info(f"从索引重建缓存，共 {len(self._templates_cache)} 个模板")
-        except Exception as e:
-            warning(f"重建缓存失败: {e}")
-
-
-    def _save_cache(self):
-        """保存缓存到文件"""
-        if not self.storage_dir:
-            return
-
-        try:
-            import json
-            cache_path = os.path.join(self.storage_dir, "vector_store_cache.json")
-            with open(cache_path, 'w', encoding='utf-8') as f:
-                json.dump(self._templates_cache, f, ensure_ascii=False, indent=2)
-            debug(f"已保存缓存: {cache_path}")
-        except Exception as e:
-            warning(f"保存缓存失败: {e}")
-
-    def _load_cache(self):
-        """从文件加载缓存"""
-        if not self.storage_dir:
-            return
-
-        try:
-            import json
-            cache_path = os.path.join(self.storage_dir, "vector_store_cache.json")
-            if os.path.exists(cache_path):
-                with open(cache_path, 'r', encoding='utf-8') as f:
-                    self._templates_cache = json.load(f)
-                info(f"已加载缓存，共 {len(self._templates_cache)} 个模板")
-        except Exception as e:
-            warning(f"加载缓存失败: {e}")
-
-
-    def _load_from_memory(self):
-        """从记忆层加载历史成功模板（启动时恢复）"""
-        if not self.memory_manager:
-            return
-
-        try:
-            # 从长期记忆获取成功提示词模式
-            successful_prompts = self.memory_manager.get(
-                "successful_prompt_patterns",
-                level=MemoryLevel.LONG_TERM,
-                default=[]
-            )
-
-            if isinstance(successful_prompts, list):
-                loaded_count = 0
-                for template_data in successful_prompts:
-                    if isinstance(template_data, dict):
-                        prompt_text = template_data.get("prompt", "")
-                        metadata = template_data.get("metadata", {})
-                        if prompt_text:
-                            # 直接添加到缓存和索引，不需要再保存到记忆层（避免循环）
-                            self._add_template_direct(prompt_text, metadata)
-                            loaded_count += 1
-
-                info(f"从记忆层加载了 {loaded_count} 个历史提示词模板")
-
-        except Exception as e:
-            warning(f"从记忆层加载模板失败: {e}")
-
-    def _add_template_direct(self, prompt_text: str, metadata: Dict[str, Any]):
+    def _rebuild_index_for_script(self, script_id: str) -> bool:
         """
-        直接添加模板到索引（不触发记忆层保存，用于启动时加载）
+        从缓存重建剧本的索引
+
+        Args:
+            script_id: 剧本ID
+
+        Returns:
+            是否重建成功
         """
+        cache = self._caches.get(script_id, [])
+        if not cache:
+            debug(f"剧本 {script_id} 无缓存数据，跳过索引重建")
+            self._indices[script_id] = None
+            return False
+
         try:
-            # 去重检查
-            for existing in self._templates_cache:
-                if existing.get("prompt") == prompt_text:
-                    return
+            documents = []
+            for item in cache:
+                prompt_text = item.get("prompt", "")
+                if not prompt_text:
+                    continue
 
-            doc = Document(
-                text=prompt_text,
-                metadata={
-                    "type": "prompt_template",
-                    "prompt": prompt_text,
-                    "timestamp": metadata.get("timestamp", datetime.now().isoformat()),
-                    "quality_score": metadata.get("quality_score", 0),
-                    "fragment_id": metadata.get("fragment_id", ""),
-                    "scene": metadata.get("scene", ""),
-                    "style": metadata.get("style", ""),
-                    **metadata
-                }
-            )
-
-            if not self.index:
-                self.index = VectorStoreIndex.from_documents(
-                    [doc],
-                    embed_model=self.embedding_model,
-                    transformations=[self.node_parser]
+                metadata = item.get("metadata", {})
+                doc = Document(
+                    text=prompt_text,
+                    metadata={
+                        "type": "prompt_template",
+                        "prompt": prompt_text,
+                        "hash": self._generate_template_hash(prompt_text),
+                        "script_id": script_id,
+                        "timestamp": item.get("added_at", datetime.now().isoformat()),
+                        "quality_score": metadata.get("quality_score", 0),
+                        "fragment_id": metadata.get("fragment_id", ""),
+                        "scene": metadata.get("scene", ""),
+                        "style": metadata.get("style", ""),
+                        **metadata
+                    }
                 )
-            else:
-                nodes = self.node_parser.get_nodes_from_documents([doc])
-                self.index.insert_nodes(nodes)
+                documents.append(doc)
 
-            self._templates_cache.append({
-                "prompt": prompt_text,
-                "metadata": metadata,
-                "added_at": metadata.get("timestamp", datetime.now().isoformat())
-            })
+            if documents:
+                return self._create_index_for_script(script_id, documents)
+            else:
+                self._indices[script_id] = None
+                return False
 
         except Exception as e:
-            warning(f"直接添加模板失败: {e}")
+            error(f"重建索引失败: {script_id}, {e}")
+            self._indices[script_id] = None
+            return False
 
+    def _get_current_index(self) -> Optional[BaseIndex]:
+        """
+        获取当前剧本的索引
 
-    def _init_script_kb(self):
+        Returns:
+            索引实例
+        """
+        if not self._current_script_id:
+            warning("未设置当前剧本ID，无法获取索引")
+            return None
+
+        return self._indices.get(self._current_script_id)
+
+    def _get_current_cache(self) -> List[Dict[str, Any]]:
+        """
+        获取当前剧本的缓存
+
+        Returns:
+            缓存列表
+        """
+        if not self._current_script_id:
+            return []
+
+        return self._caches.get(self._current_script_id, [])
+
+    def _truncate_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        截断过长的元数据，避免块大小警告
+
+        Args:
+            metadata: 原始元数据
+
+        Returns:
+            截断后的元数据
+        """
+        truncated = {}
+
+        for key, value in metadata.items():
+            if isinstance(value, str) and len(value) > self.max_metadata_length:
+                truncated[key] = value[:self.max_metadata_length - 3] + "..."
+                warning(f"元数据字段 '{key}' 过长，已截断")
+            elif isinstance(value, dict):
+                truncated[key] = self._truncate_metadata(value)
+            else:
+                truncated[key] = value
+
+        return truncated
+
+    def _generate_template_hash(self, prompt_text: str) -> str:
+        """
+        生成模板哈希值用于去重
+
+        Args:
+            prompt_text: 提示词文本
+
+        Returns:
+            哈希值
+        """
+        # 标准化：去除空白差异
+        normalized = ' '.join(prompt_text.strip().split())
+        return hashlib.md5(normalized.encode('utf-8')).hexdigest()[:16]
+
+    def _init_script_kb(self) -> None:
         """初始化剧本知识库"""
         try:
-            storage_dir = os.path.join(self.storage_dir, "script_kb") if self.storage_dir else None
+            storage_dir = os.path.join(self.base_storage_dir, "script_kb") if self.base_storage_dir else None
             self.script_kb = ScriptKnowledgeBase(
                 embeddings=self.embedding_model,
                 storage_dir=storage_dir,
@@ -324,8 +435,14 @@ class PromptTemplateManager:
             warning(f"剧本知识库初始化失败: {e}")
             self.script_kb = None
 
-    def add_script(self, script_text: str, script_id: str):
-        """添加剧本到知识库"""
+    def add_script(self, script_text: str, script_id: str) -> None:
+        """
+        添加剧本到知识库
+
+        Args:
+            script_text: 剧本文本
+            script_id: 剧本ID
+        """
         if self.script_kb:
             try:
                 self.script_kb.add_script_text(script_text, script_id)
@@ -333,22 +450,47 @@ class PromptTemplateManager:
             except Exception as e:
                 warning(f"添加剧本到知识库失败: {e}")
 
-    def add_parsed_script(self, parsed_script, script_id=None):
-        """添加已解析的剧本到知识库"""
-        return self.script_kb.add_parsed_script(parsed_script, script_id)
+    def add_parsed_script(self, parsed_script, script_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        添加已解析的剧本到知识库
+
+        Args:
+            parsed_script: 已解析的剧本对象
+            script_id: 剧本ID
+
+        Returns:
+            添加结果
+        """
+        if self.script_kb:
+            return self.script_kb.add_parsed_script(parsed_script, script_id)
+        return {"status": "failed", "error": "知识库未初始化"}
 
     def is_script_kb_available(self) -> bool:
-        """检查剧本知识库是否可用"""
+        """
+        检查剧本知识库是否可用
+
+        Returns:
+            是否可用
+        """
         if not self.script_kb:
             return False
         try:
             stats = self.script_kb.get_statistics()
             return stats.get("script_count", 0) > 0
-        except:
+        except Exception:
             return False
 
     def search_similar_scene(self, query_text: str, top_k: int = 3) -> List[Dict]:
-        """搜索相似场景（用于连续性检查）"""
+        """
+        搜索相似场景（用于连续性检查）
+
+        Args:
+            query_text: 查询文本
+            top_k: 返回数量
+
+        Returns:
+            相似场景列表
+        """
         if not self.script_kb:
             return []
 
@@ -364,11 +506,33 @@ class PromptTemplateManager:
             warning(f"搜索相似场景失败: {e}")
             return []
 
+    def _is_duplicate(self, script_id: str, prompt_text: str) -> bool:
+        """
+        检查模板是否已存在
+
+        Args:
+            script_id: 剧本ID
+            prompt_text: 提示词文本
+
+        Returns:
+            是否存在
+        """
+        cache = self._caches.get(script_id, [])
+        prompt_hash = self._generate_template_hash(prompt_text)
+
+        for item in cache:
+            if item.get("hash") == prompt_hash:
+                return True
+            if item.get("prompt") == prompt_text:
+                return True
+
+        return False
 
     def add_template(
             self,
             prompt_text: str,
             metadata: Dict[str, Any],
+            script_id: str,
             save_to_memory: bool = True
     ) -> bool:
         """
@@ -377,73 +541,123 @@ class PromptTemplateManager:
         Args:
             prompt_text: 提示词文本
             metadata: 元数据（fragment_id, scene, style, quality_score等）
+            script_id: 剧本ID（默认使用当前剧本）
             save_to_memory: 是否同时保存到记忆层
 
         Returns:
             是否添加成功
         """
+        target_script_id = script_id or self._current_script_id
+
+        if not target_script_id:
+            warning("未指定剧本ID且未设置当前剧本，无法添加模板")
+            return False
+
+        # 防止递归
+        stack_key = f"add_template_{target_script_id}_{hash(prompt_text[:100])}"
+        if stack_key in self._processing_stack:
+            warning(f"检测到递归调用，跳过添加模板")
+            return False
+
+        self._processing_stack.add(stack_key)
+
         try:
+            # 限制提示词长度
+            if len(prompt_text) > 2000:
+                prompt_text = prompt_text[:1997] + "..."
+                warning(f"提示词过长，已截断")
+
             # 去重检查
-            for existing in self._templates_cache:
-                if existing.get("prompt") == prompt_text:
-                    debug("提示词模板已存在，跳过添加")
-                    return False
+            if self._is_duplicate(target_script_id, prompt_text):
+                debug("提示词模板已存在，跳过添加")
+                return False
+
+            # 截断过长的元数据
+            truncated_metadata = self._truncate_metadata(metadata)
+
+            # 生成哈希
+            template_hash = self._generate_template_hash(prompt_text)
 
             # 创建文档
+            doc_metadata = {
+                "type": "prompt_template",
+                "prompt": prompt_text,
+                "hash": template_hash,
+                "script_id": target_script_id,
+                "timestamp": datetime.now().isoformat(),
+                "quality_score": truncated_metadata.get("quality_score", 0),
+                "fragment_id": truncated_metadata.get("fragment_id", ""),
+                "scene": truncated_metadata.get("scene", ""),
+                "style": truncated_metadata.get("style", ""),
+                "shot_type": truncated_metadata.get("shot_type", ""),
+                "duration": truncated_metadata.get("duration", 0),
+                **truncated_metadata
+            }
+
             doc = Document(
                 text=prompt_text,
-                metadata={
-                    "type": "prompt_template",
-                    "prompt": prompt_text,
-                    "timestamp": datetime.now().isoformat(),
-                    "quality_score": metadata.get("quality_score", 0),
-                    "fragment_id": metadata.get("fragment_id", ""),
-                    "scene": metadata.get("scene", ""),
-                    "style": metadata.get("style", ""),
-                    "shot_type": metadata.get("shot_type", ""),
-                    "duration": metadata.get("duration", 0),
-                    **metadata
-                }
+                metadata=doc_metadata
             )
 
-            # 添加到索引
-            if not self.index:
-                self.index = VectorStoreIndex.from_documents(
-                    [doc],
-                    embed_model=self.embedding_model,
-                    transformations=[self.node_parser]
-                )
-                info(f"创建提示词模板索引")
-            else:
-                nodes = self.node_parser.get_nodes_from_documents([doc])
-                self.index.insert_nodes(nodes)
+            # 确保该剧本的索引和缓存已加载
+            if target_script_id not in self._cache_loaded:
+                self._load_cache_for_script(target_script_id)
+                self._load_index_for_script(target_script_id)
 
-            # 缓存
-            self._templates_cache.append({
+            # 添加到索引
+            current_index = self._indices.get(target_script_id)
+            if not current_index:
+                # 创建新索引
+                success = self._create_index_for_script(target_script_id, [doc])
+                if not success:
+                    error(f"创建索引失败，无法添加模板")
+                    return False
+            else:
+                # 插入到现有索引
+                nodes = self.node_parser.get_nodes_from_documents([doc])
+                current_index.insert_nodes(nodes)
+                self._save_index_for_script(target_script_id)
+
+            # 添加到缓存
+            if target_script_id not in self._caches:
+                self._caches[target_script_id] = []
+
+            self._caches[target_script_id].append({
                 "prompt": prompt_text,
-                "metadata": metadata,
+                "hash": template_hash,
+                "metadata": truncated_metadata,
                 "added_at": datetime.now().isoformat()
             })
 
-            # 保存到磁盘
-            self._save_index()
-            self._save_cache()
+            # 保存缓存
+            self._save_cache_for_script(target_script_id)
 
-            # 保存到记忆层
+            # 保存到记忆层（全局，不隔离）
             if save_to_memory and self.memory_manager:
-                self._save_to_memory(prompt_text, metadata)
+                self._save_to_memory(prompt_text, truncated_metadata)
 
-            info(f"添加提示词模板成功，当前总数: {len(self._templates_cache)}")
+            debug(f"添加提示词模板成功，剧本: {target_script_id}, 当前总数: {len(self._caches[target_script_id])}")
             return True
 
         except Exception as e:
             error(f"添加提示词模板失败: {e}")
             return False
 
-    def _save_to_memory(self, prompt_text: str, metadata: Dict[str, Any]):
-        """保存模板到记忆层"""
+        finally:
+            self._processing_stack.discard(stack_key)
+
+    def _save_to_memory(self, prompt_text: str, metadata: Dict[str, Any]) -> None:
+        """
+        保存模板到全局记忆层（跨剧本共享）
+
+        Args:
+            prompt_text: 提示词文本
+            metadata: 元数据
+        """
+        if not self.memory_manager:
+            return
+
         try:
-            # 获取现有模板列表
             existing = self.memory_manager.get(
                 "successful_prompt_patterns",
                 level=MemoryLevel.LONG_TERM,
@@ -454,24 +668,25 @@ class PromptTemplateManager:
                 existing = []
 
             # 去重
-            new_template = {
-                "prompt": prompt_text,
-                "metadata": metadata,
-                "timestamp": datetime.now().isoformat()
-            }
-
-            # 检查是否已存在
+            template_hash = self._generate_template_hash(prompt_text)
             exists = False
             for item in existing:
-                if isinstance(item, dict) and item.get("prompt") == prompt_text:
+                if isinstance(item, dict) and item.get("hash") == template_hash:
                     exists = True
                     break
 
             if not exists:
+                new_template = {
+                    "hash": template_hash,
+                    "prompt": prompt_text,
+                    "metadata": metadata,
+                    "timestamp": datetime.now().isoformat()
+                }
                 existing.append(new_template)
-                # 保持最近100条
-                if len(existing) > 100:
-                    existing = existing[-100:]
+
+                # 保持最近200条
+                if len(existing) > 200:
+                    existing = existing[-200:]
 
                 self.memory_manager.add(
                     "successful_prompt_patterns",
@@ -479,40 +694,58 @@ class PromptTemplateManager:
                     level=MemoryLevel.LONG_TERM,
                     metadata={"_serialized": True}
                 )
-                debug("已同步到记忆层")
+                debug("已同步到全局记忆层")
+
         except Exception as e:
             warning(f"保存到记忆层失败: {e}")
 
     def search_similar(
             self,
             query_text: str,
+            script_id: Optional[str] = None,
             top_k: Optional[int] = None,
-            min_score: Optional[float] = None
+            min_score: Optional[float] = None,
+            include_global: bool = True
     ) -> List[Dict[str, Any]]:
         """
         搜索相似提示词模板
 
         Args:
             query_text: 查询文本
+            script_id: 剧本ID（不指定则使用当前剧本）
             top_k: 返回数量
             min_score: 最低相似度分数
+            include_global: 是否包含全局模板（其他剧本）
 
         Returns:
             相似模板列表
         """
-        if not self.index:
-            debug("提示词模板索引未初始化")
+        target_script_id = script_id or self._current_script_id
+
+        if not target_script_id:
+            debug("未指定剧本ID且未设置当前剧本，无法搜索")
             return []
 
-        if len(self._templates_cache) == 0:
-            debug("提示词模板库为空")
+        # 确保缓存已加载
+        if target_script_id not in self._cache_loaded:
+            self._load_cache_for_script(target_script_id)
+            self._load_index_for_script(target_script_id)
+
+        current_index = self._indices.get(target_script_id)
+        if not current_index:
+            debug(f"剧本 {target_script_id} 的索引未初始化")
+            return []
+
+        cache = self._caches.get(target_script_id, [])
+        if len(cache) == 0:
+            debug(f"剧本 {target_script_id} 的模板库为空")
             return []
 
         try:
             top_k = top_k or self.top_k
             min_score = min_score or self.min_similarity_score
 
-            retriever = self.index.as_retriever(
+            retriever = current_index.as_retriever(
                 similarity_top_k=top_k,
                 retriever_mode="similarity"
             )
@@ -521,7 +754,7 @@ class PromptTemplateManager:
 
             results = []
             for node in nodes:
-                score = node.score if hasattr(node, 'score') else 0
+                score = getattr(node, 'score', 0)
 
                 if score < min_score:
                     continue
@@ -533,7 +766,8 @@ class PromptTemplateManager:
                     "prompt": node.node.text,
                     "score": score,
                     "metadata": node.node.metadata,
-                    "node_id": node.node.node_id
+                    "node_id": node.node.node_id,
+                    "script_id": node.node.metadata.get("script_id", target_script_id)
                 })
 
             debug(f"搜索相似提示词: '{query_text[:50]}...', 找到 {len(results)} 个结果")
@@ -546,6 +780,7 @@ class PromptTemplateManager:
     def get_best_match(
             self,
             query_text: str,
+            script_id: Optional[str] = None,
             min_score: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """
@@ -553,17 +788,19 @@ class PromptTemplateManager:
 
         Args:
             query_text: 查询文本
+            script_id: 剧本ID
             min_score: 最低相似度分数
 
         Returns:
             最佳匹配模板，或 None
         """
-        results = self.search_similar(query_text, top_k=1, min_score=min_score)
+        results = self.search_similar(query_text, script_id=script_id, top_k=1, min_score=min_score)
         return results[0] if results else None
 
     def enhance_prompt(
             self,
             original_prompt: str,
+            script_id: Optional[str] = None,
             enhancement_mode: str = "append"
     ) -> str:
         """
@@ -571,29 +808,29 @@ class PromptTemplateManager:
 
         Args:
             original_prompt: 原始提示词
-            enhancement_mode: 增强模式 (append, replace, hybrid)
+            script_id: 剧本ID
+            enhancement_mode: 增强模式 (append, replace, hybrid, none)
 
         Returns:
             增强后的提示词
         """
-        best_match = self.get_best_match(original_prompt)
+        if enhancement_mode == "none":
+            return original_prompt
+
+        best_match = self.get_best_match(original_prompt, script_id=script_id)
 
         if not best_match:
             return original_prompt
 
         template = best_match["prompt"]
-        score = best_match["score"]
 
         if enhancement_mode == "append":
-            # 追加模式：保留原提示词，追加参考模板
             return f"{original_prompt}\n\n参考优秀模板:\n{template}"
 
         elif enhancement_mode == "replace":
-            # 替换模式：用模板替换（保留关键信息）
             return self._merge_prompts(original_prompt, template)
 
-        else:  # hybrid
-            # 混合模式：智能融合
+        else:
             return self._merge_prompts(original_prompt, template)
 
     def _merge_prompts(self, original: str, template: str) -> str:
@@ -607,10 +844,6 @@ class PromptTemplateManager:
         Returns:
             融合后的提示词
         """
-        # 提取原始提示词中的关键元素（场景、角色、动作等）
-        # 这里实现简单的拼接，可以根据需要定制
-
-        # 简单实现：提取模板中的结构，填充原始内容
         return f"{template}\n\n根据当前片段调整:\n{original}"
 
     def save_successful_prompt(
@@ -618,8 +851,9 @@ class PromptTemplateManager:
             fragment_id: str,
             prompt_text: str,
             quality_score: float,
+            script_id: str,
             additional_metadata: Optional[Dict] = None
-    ):
+    ) -> bool:
         """
         保存成功的提示词（在质量审查通过后调用）
 
@@ -627,7 +861,11 @@ class PromptTemplateManager:
             fragment_id: 片段ID
             prompt_text: 提示词文本
             quality_score: 质量分数
+            script_id: 剧本ID
             additional_metadata: 额外元数据
+
+        Returns:
+            是否保存成功
         """
         metadata = {
             "fragment_id": fragment_id,
@@ -638,36 +876,118 @@ class PromptTemplateManager:
         if additional_metadata:
             metadata.update(additional_metadata)
 
-        self.add_template(prompt_text, metadata)
-        info(f"保存成功提示词: {fragment_id}, 质量分数: {quality_score}")
+        return self.add_template(prompt_text, metadata, script_id=script_id)
 
-    def get_statistics(self) -> Dict[str, Any]:
-        """获取统计信息"""
-        return {
-            "template_count": len(self._templates_cache),
-            "has_index": self.index is not None,
-            "storage_dir": self.storage_dir,
-            "min_similarity_score": self.min_similarity_score,
-            "top_k": self.top_k
-        }
+    def get_statistics(self, script_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取统计信息
 
-    def is_available(self) -> bool:
-        """检查知识库是否可用（有模板数据）"""
-        return self.index is not None and len(self._templates_cache) > 0
+        Args:
+            script_id: 剧本ID（不指定则返回全局统计）
 
-    def clear(self):
-        """清空知识库"""
-        self.index = None
-        self._templates_cache = []
+        Returns:
+            统计信息字典
+        """
+        if script_id:
+            cache = self._caches.get(script_id, [])
+            has_index = self._indices.get(script_id) is not None
+            return {
+                "script_id": script_id,
+                "template_count": len(cache),
+                "has_index": has_index,
+                "storage_dir": self._get_script_storage_dir(script_id),
+                "min_similarity_score": self.min_similarity_score,
+                "top_k": self.top_k,
+                "max_cache_size": self.max_cache_size
+            }
+        else:
+            return {
+                "total_scripts": len(self._caches),
+                "scripts": {
+                    sid: {
+                        "template_count": len(cache),
+                        "has_index": self._indices.get(sid) is not None
+                    }
+                    for sid, cache in self._caches.items()
+                },
+                "current_script": self._current_script_id,
+                "global_settings": {
+                    "min_similarity_score": self.min_similarity_score,
+                    "top_k": self.top_k,
+                    "max_cache_size": self.max_cache_size,
+                    "max_metadata_length": self.max_metadata_length
+                }
+            }
 
-        if self.storage_dir:
-            vector_store_path = os.path.join(self.storage_dir, "prompt_vector_store.json")
-            if os.path.exists(vector_store_path):
-                os.remove(vector_store_path)
+    def is_available(self, script_id: Optional[str] = None) -> bool:
+        """
+        检查知识库是否可用（有模板数据）
 
-            # ========== 删除缓存文件 ==========
-            cache_path = os.path.join(self.storage_dir, "vector_store_cache.json")
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
+        Args:
+            script_id: 剧本ID
 
-        info("提示词模板知识库已清空")
+        Returns:
+            是否可用
+        """
+        target_id = script_id or self._current_script_id
+        if not target_id:
+            return False
+
+        cache = self._caches.get(target_id, [])
+        return self._indices.get(target_id) is not None and len(cache) > 0
+
+    def clear_for_script(self, script_id: str) -> bool:
+        """
+        清空指定剧本的知识库
+
+        Args:
+            script_id: 剧本ID
+
+        Returns:
+            是否清空成功
+        """
+        try:
+            # 清空索引
+            self._indices[script_id] = None
+
+            # 清空缓存
+            self._caches[script_id] = []
+
+            # 删除存储目录
+            script_dir = self._get_script_storage_dir(script_id)
+            if os.path.exists(script_dir):
+                shutil.rmtree(script_dir)
+                info(f"已删除剧本 {script_id} 的存储目录")
+
+            # 重置加载标记
+            self._cache_loaded.discard(script_id)
+
+            info(f"已清空剧本 {script_id} 的知识库")
+            return True
+
+        except Exception as e:
+            error(f"清空剧本 {script_id} 知识库失败: {e}")
+            return False
+
+    def clear_all(self) -> bool:
+        """
+        清空所有剧本的知识库
+
+        Returns:
+            是否清空成功
+        """
+        try:
+            for script_id in list(self._caches.keys()):
+                self.clear_for_script(script_id)
+
+            self._indices.clear()
+            self._caches.clear()
+            self._cache_loaded.clear()
+            self._current_script_id = None
+
+            info("已清空所有知识库")
+            return True
+
+        except Exception as e:
+            error(f"清空所有知识库失败: {e}")
+            return False

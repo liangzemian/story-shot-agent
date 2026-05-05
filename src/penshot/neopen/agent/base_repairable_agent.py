@@ -133,7 +133,7 @@ class BaseRepairableAgent(BaseAgent, Generic[T, K]):
         self.current_historical_context = historical_context
         self._context_applied = True
 
-        info("应用历史上下文优化策略")
+        debug("应用历史上下文优化策略")
 
         # 1. 分析常见问题模式
         self._analyze_common_issues(historical_context)
@@ -213,7 +213,7 @@ class BaseRepairableAgent(BaseAgent, Generic[T, K]):
         # 质量评估
         if avg_completeness < 0.6:
             self._historical_insights["quality_level"] = "poor"
-            warning(f"历史解析质量较低[{avg_completeness}]，将启用增强验证模式")
+            info(f"历史解析质量较低[{avg_completeness}]，将启用增强验证模式")
         elif avg_completeness < 0.8:
             self._historical_insights["quality_level"] = "medium"
             info(f"历史解析质量中等[{avg_completeness}]，建议关注关键字段提取")

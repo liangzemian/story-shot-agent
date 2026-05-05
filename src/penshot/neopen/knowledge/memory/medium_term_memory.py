@@ -53,11 +53,11 @@ class MediumTermMemory:
 
         # 文件持久化路径
         self.persist_path = None
-        if config.medium_term_persist_path:
-            self.persist_path = Path(config.medium_term_persist_path) / script_id
+        if config.term_persist_path:
+            self.persist_path = Path(config.term_persist_path) / script_id
             self.persist_path.mkdir(parents=True, exist_ok=True)
             self._load_from_file()  # 启动时加载
-            self.storage = create_result_storage(base_output_dir=config.medium_term_persist_path)
+            self.storage = create_result_storage(base_output_dir=config.term_persist_path)
 
         # 创建带记忆的链
         self.memory = self._create_memory_chain()
@@ -162,7 +162,7 @@ class MediumTermMemory:
 
         # 删除持久化文件
         if self.persist_path:
-            summary_file = self.persist_path / "summary.json"
+            summary_file = self.persist_path / "medium_summary.json"
             if summary_file.exists():
                 summary_file.unlink()
 
@@ -182,7 +182,7 @@ class MediumTermMemory:
                 "updated_at": datetime.now().isoformat(),
                 "max_tokens": self.max_token_limit
             }
-            self.storage.save_json_result(self.script_id, "", data, f"summary_{datetime.now().strftime('%Y%m%d%H')}.json")
+            self.storage.save_json_result(self.script_id, "", data, f"medium_summary_{datetime.now().strftime('%Y%m%d%H')}.json")
 
         except Exception as e:
             error(f"持久化摘要失败: {e}")
@@ -193,7 +193,7 @@ class MediumTermMemory:
             return
 
         try:
-            summary_file = self.persist_path / "summary.json"
+            summary_file = self.persist_path / "medium_summary.json"
             if not summary_file.exists():
                 return
 

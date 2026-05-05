@@ -112,9 +112,9 @@ class ExecutionState(BaseModel):
         PipelineNode.PARSE_SCRIPT: 3,
         PipelineNode.SEGMENT_SHOT: 5,
         PipelineNode.SPLIT_VIDEO: 5,
-        PipelineNode.CONVERT_PROMPT: 3,
+        PipelineNode.CONVERT_PROMPT: 5,
         PipelineNode.AUDIT_QUALITY: 3,
-        PipelineNode.CONTINUITY_CHECK: 3,
+        PipelineNode.CONTINUITY_CHECK: 5,
         PipelineNode.ERROR_HANDLER: 5,
         PipelineNode.HUMAN_INTERVENTION: 1,
     }
@@ -152,7 +152,7 @@ class ExecutionState(BaseModel):
     needs_human_review: bool = False
     human_feedback: Dict[str, Any] = {}
     human_intervention_info: Dict[str, Any] = {}
-    
+
     # 中止控制
     should_abort: bool = False
 

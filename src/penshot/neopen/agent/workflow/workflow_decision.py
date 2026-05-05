@@ -14,7 +14,7 @@ from penshot.neopen.agent.human_decision.human_decision_converter import HumanDe
 from penshot.neopen.agent.quality_auditor.quality_auditor_models import AuditStatus, SeverityLevel
 from penshot.neopen.agent.workflow.workflow_models import PipelineState, PipelineNode, AgentStage
 from penshot.neopen.agent.workflow.workflow_state_types import WorkflowState
-from penshot.logger import error, warning, info
+from penshot.logger import error, warning, info, debug
 
 
 class PipelineDecision:
@@ -134,7 +134,8 @@ class PipelineDecision:
         loop_decision, loop_reason = self._check_and_increment_node_loop(state, PipelineNode.SEGMENT_SHOT)
         if loop_decision != PipelineState.SUCCESS:
             state.errors.error_messages.append(f"镜头拆分节点循环检查失败: {loop_reason}")
-            return loop_decision
+            # 循环超限时，直接返回 FAILED，让错误处理器决定是否可恢复
+            return PipelineState.FAILED
 
         # 检查阶段重试限制
         can_retry, retry_reason = self._can_retry_stage(state, PipelineNode.SEGMENT_SHOT)
@@ -215,7 +216,7 @@ class PipelineDecision:
             return PipelineState.FAILED
 
         # 检查时长合规性：不能超过5.2秒
-        invalid_fragments = [f for f in fragment_sequence.fragments if f.duration > state.config.max_fragment_duration + 0.5]  # 允许一定的时长波动
+        invalid_fragments = [f for f in fragment_sequence.fragments if f.duration > state.config.max_fragment_duration + 1]  # 允许一定的时长波动
         if invalid_fragments:
             if len(invalid_fragments) <= 3:
                 # 少量问题，检查是否可以重试
@@ -236,7 +237,18 @@ class PipelineDecision:
         if short_fragments:
             # 有过短片段，需要修复
             warning(f"发现{len(short_fragments)}个过短片段（<{state.config.min_fragment_duration}秒）")
-            return PipelineState.NEEDS_REPAIR
+            if can_retry:
+                state = self._increment_stage_retry(state, PipelineNode.SPLIT_VIDEO)
+                return PipelineState.NEEDS_REPAIR
+            return PipelineState.FAILED
+
+        # 如果分割后片段数和镜头数相同，说明没有真正分割
+        shot_count = len(state.domain.shot_sequence.shots) if state.domain.shot_sequence else 0
+        fragment_count = len(fragment_sequence.fragments)
+
+        if shot_count > 0 and fragment_count == shot_count and shot_count > 1:
+            # 没有进行有效分割，但可能不需要重试（如果已经在合理范围内）
+            debug(f"片段数({fragment_count})等于镜头数({shot_count})，没有进行分割，但允许继续")
 
         # 成功，重置重试计数
         state.execution.stage_current_retries[PipelineNode.SPLIT_VIDEO] = 0
@@ -346,7 +358,7 @@ class PipelineDecision:
         """
         # 检查是否已经审查过且结果有效
         if state.domain.audit_executed and state.domain.audit_report:
-            warning("检测到可能的重复质量审查调用，使用上次结果")
+            info("检测到可能的重复质量审查调用，使用上次结果")
             return PipelineState.SUCCESS
 
         # 检查节点循环限制

@@ -24,6 +24,8 @@ class MemoryLevel(str, Enum):
 @dataclass
 class MemoryConfig:
     """记忆配置"""
+    term_persist_path: Optional[str] = "data/memory/"  # 文件持久化路径
+
     # 短期记忆配置（可使用Redis）
     short_term_size: int = 20
     short_term_ttl: int = 3600  # 秒
@@ -32,13 +34,11 @@ class MemoryConfig:
     # 中期记忆配置（文件持久化）
     medium_term_max_tokens: int = 500
     medium_term_summary_prompt: Optional[str] = None
-    medium_term_persist_path: Optional[str] = "data/memory/medium"  # 文件持久化路径
 
     # 长期记忆配置（向量数据库）
     long_term_enabled: bool = True
     long_term_k: int = 3
     long_term_score_threshold: float = 0.7
-    long_term_store_path: str = "data/memory/long"
 
     # 嵌入模型配置
     embeddings: Embeddings = None

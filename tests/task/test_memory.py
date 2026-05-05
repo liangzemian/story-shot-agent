@@ -18,11 +18,9 @@ config = MemoryConfig(
 
     # 中期记忆：文件持久化
     medium_term_max_tokens=500,
-    medium_term_persist_path="data/memory/medium",  # 文件存储路径
 
     # 长期记忆：向量数据库
     long_term_enabled=True,
-    long_term_store_path="data/memory/long"
 )
 
 # 初始化LLM

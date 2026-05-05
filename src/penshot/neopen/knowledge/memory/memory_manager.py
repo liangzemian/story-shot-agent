@@ -39,7 +39,7 @@ class MemoryManager:
 
         self.set_script(script_id)
 
-        info("初始化记忆管理器")
+        debug("初始化记忆管理器")
 
     def set_script(self, script_id: str):
         """设置当前任务"""
@@ -336,21 +336,31 @@ class MemoryManager:
         info("清空所有记忆")
 
     # ===================== 私有辅助方法 =====================
-
     def _deserialize(self, value: str, metadata: Dict = None) -> Any:
         """反序列化记忆值"""
-        if metadata and metadata.get("_serialized"):
+        if not value:
+            return None
+
+        # 检查是否是序列化的JSON
+        is_serialized = metadata and metadata.get("_serialized", False)
+
+        if is_serialized or (isinstance(value, str) and value.startswith(('{', '['))):
             try:
+                # 尝试解析JSON
                 return json.loads(value)
-            except:
+            except json.JSONDecodeError:
+                # 如果不是JSON，返回原值
                 return value
         return value
 
     def _to_str(self, value: Any) -> str:
         """将任意值转换为字符串"""
+        if value is None:
+            return ""
         if isinstance(value, str):
             return value
         try:
+            # 对于可序列化的对象，使用JSON
             return json.dumps(value, ensure_ascii=False, default=str)
-        except:
+        except (TypeError, ValueError):
             return str(value)

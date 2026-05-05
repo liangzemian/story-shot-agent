@@ -157,6 +157,7 @@ class MultiAgentPipeline:
                 PipelineState.SUCCESS: PipelineNode.LOOP_CHECK.value,
                 PipelineState.NEEDS_RETRY: PipelineNode.SEGMENT_SHOT.value,
                 PipelineState.NEEDS_REPAIR: PipelineNode.SEGMENT_SHOT.value,
+                PipelineState.NEEDS_HUMAN: PipelineNode.HUMAN_INTERVENTION.value,
                 PipelineState.FAILED: PipelineNode.ERROR_HANDLER.value
             }
         )
@@ -183,6 +184,7 @@ class MultiAgentPipeline:
                 PipelineState.VALID: PipelineNode.LOOP_CHECK.value,
                 PipelineState.NEEDS_REPAIR: PipelineNode.CONVERT_PROMPT.value,
                 PipelineState.NEEDS_RETRY: PipelineNode.CONVERT_PROMPT.value,
+                PipelineState.NEEDS_HUMAN: PipelineNode.HUMAN_INTERVENTION.value,
                 PipelineState.FAILED: PipelineNode.ERROR_HANDLER.value
             }
         )
@@ -261,7 +263,7 @@ class MultiAgentPipeline:
 
         # 编译工作流（添加记忆器）
         compiled_graph = orchestrator.graph.compile(checkpointer=self.memory)
-        info("工作流构建完成")
+        debug("工作流构建完成")
 
         return compiled_graph
 
@@ -423,42 +425,6 @@ class MultiAgentPipeline:
                 "stage_count": 0
             }
 
-    async def _enhanced_workflow_execution(self, initial_state: WorkflowState) -> Dict[str, Any]:
-        """
-        增强的工作流执行方法
-        """
-        try:
-            debug("开始增强的工作流执行...")
-
-            final_result = await asyncio.wait_for(
-                self.output_fixer.enhanced_workflow_invoke(
-                    self.workflow,
-                    initial_state
-                ),
-                timeout=initial_state.input.timeout
-            )
-
-            if not self._validate_fixed_result(final_result):
-                warning("工作流输出修复验证有问题，但继续返回结果")
-
-            return self.output_fixer.parse_result_to_dict(final_result)
-
-        except Exception as e:
-            error(f"增强工作流执行失败: {str(e)}")
-
-            warning("尝试原始workflow调用作为回退...")
-            try:
-                raw_state = await self.workflow.ainvoke(
-                    initial_state,
-                    config={"configurable": {"thread_id": f"process_{id(initial_state)}"}}
-                )
-
-                return self._convert_raw_state_to_result(raw_state, initial_state)
-
-            except Exception as e2:
-                error(f"原始调用也失败: {str(e2)}")
-                raise e
-
     def _validate_fixed_result(self, result: Dict[str, Any]) -> bool:
         """验证修复后的结果"""
         try:
@@ -613,6 +579,111 @@ class MultiAgentPipeline:
                 "error": str(e),
                 "task_id": initial_state.input.task_id
             }
+
+
+    def _validate_and_fix_fragment_stats(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """验证并修复片段统计"""
+        try:
+            fragment_sequence = data.get("fragment_sequence", {})
+            if not fragment_sequence:
+                return data
+
+            fragments = fragment_sequence.get("fragments", [])
+            source_info = fragment_sequence.get("source_info", {})
+            shot_count = source_info.get("shot_count", 0)
+
+            # 检查统计是否正确
+            current_fragment_count = len(fragments)
+            current_stats = fragment_sequence.get("stats", {})
+
+            # 修复错误的统计
+            if current_stats.get("fragments_split", 0) == shot_count and shot_count > 0:
+                # 错误：所有镜头都被标记为分割
+                # 重新计算实际分割的镜头数
+                split_shots = set()
+                for f in fragments:
+                    if hasattr(f, 'metadata') and isinstance(f.metadata, dict):
+                        if f.metadata.get("is_split", False):
+                            original_shot = f.metadata.get("original_shot")
+                            if original_shot:
+                                split_shots.add(original_shot)
+
+                actual_split_count = len(split_shots)
+                current_stats["fragments_split"] = actual_split_count
+                current_stats["split_ratio"] = round(actual_split_count / shot_count, 2) if shot_count > 0 else 0
+
+                fragment_sequence["stats"] = current_stats
+                data["fragment_sequence"] = fragment_sequence
+
+                warning(f"修复统计: fragments_split从{shot_count}改为{actual_split_count}")
+
+            return data
+
+        except Exception as e:
+            error(f"验证片段统计时出错: {str(e)}")
+            return data
+
+    async def _enhanced_workflow_execution(self, initial_state: WorkflowState) -> Dict[str, Any]:
+        """增强的工作流执行方法（添加统计修复）"""
+        debug("开始增强的工作流执行...")
+
+        # 获取超时时间，如果没有配置则使用 None（不超时）
+        timeout = getattr(initial_state.input, 'timeout', None)
+        if timeout is None:
+            timeout = getattr(initial_state.config, 'workflow_timeout', 1800)  # 默认30分钟
+        debug(f"工作流超时设置: {timeout}秒")
+
+        try:
+            final_result = await asyncio.wait_for(
+                self.output_fixer.enhanced_workflow_invoke(
+                    self.workflow,
+                    initial_state
+                ),
+                timeout=timeout
+            )
+
+            # 添加统计修复
+            if final_result.get("success", False) and final_result.get("data"):
+                final_result["data"] = self._validate_and_fix_fragment_stats(final_result["data"])
+
+            if not self._validate_fixed_result(final_result):
+                warning("工作流输出修复验证有问题，但继续返回结果")
+
+            return self.output_fixer.parse_result_to_dict(final_result)
+
+        except asyncio.TimeoutError:
+            error(f"工作流执行超时: {timeout}秒")
+            return {
+                "success": False,
+                "error": f"工作流执行超时 ({timeout}秒)",
+                "data": None,
+                "processing_stats": {
+                    "error": "timeout",
+                    "timeout_seconds": timeout
+                },
+                "task_id": initial_state.input.task_id,
+                "workflow_status": "timeout"
+            }
+        except Exception as e:
+            error(f"增强工作流执行失败: {str(e)}")
+
+            warning("尝试原始workflow调用作为回退...")
+            try:
+                raw_state = await self.workflow.ainvoke(
+                    initial_state,
+                    config={"configurable": {"thread_id": f"process_{id(initial_state)}"}}
+                )
+
+                result = self._convert_raw_state_to_result(raw_state, initial_state)
+                # 修复回退结果中的统计
+                if result.get("success", False) and result.get("data"):
+                    result["data"] = self._validate_and_fix_fragment_stats(result["data"])
+                return result
+
+            except Exception as e2:
+                error(f"原始调用也失败: {str(e2)}")
+                raise e
+
 
     def health_check(self) -> Dict[str, Any]:
         """检查工作流健康状态"""

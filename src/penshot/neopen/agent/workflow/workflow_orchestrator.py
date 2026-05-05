@@ -123,11 +123,47 @@ class WorkflowOrchestrator:
 
         try:
             result = self._compiled_graph.invoke(input_data)
+            # 提取统计信息
+            if isinstance(result, dict):
+                self._extract_and_fix_stats(result)
+
             info(f"工作流执行完成，状态: {result.get('status', 'unknown')}")
             return result
         except Exception as e:
             error(f"工作流执行失败: {e}")
             raise
+
+    def _extract_and_fix_stats(self, state: Dict[str, Any]):
+        """提取并修复统计信息"""
+        try:
+            fragment_sequence = state.get("fragment_sequence")
+            if fragment_sequence and isinstance(fragment_sequence, dict):
+                shot_count = fragment_sequence.get("source_info", {}).get("shot_count", 0)
+                fragments = fragment_sequence.get("fragments", [])
+                stats = fragment_sequence.get("stats", {})
+
+                # 计算实际分割数
+                split_shots = set()
+                for f in fragments:
+                    if isinstance(f, dict):
+                        metadata = f.get("metadata", {})
+                        if metadata.get("is_split", False):
+                            original_shot = metadata.get("original_shot")
+                            if original_shot:
+                                split_shots.add(original_shot)
+
+                actual_split = len(split_shots)
+
+                # 修复错误的统计
+                if stats.get("fragments_split", 0) != actual_split and actual_split > 0:
+                    stats["fragments_split"] = actual_split
+                    stats["split_ratio"] = round(actual_split / shot_count, 2) if shot_count > 0 else 0
+                    fragment_sequence["stats"] = stats
+                    debug(f"修复统计: fragments_split={actual_split}, split_ratio={stats['split_ratio']}")
+
+        except Exception as e:
+            debug(f"提取统计信息时出错: {e}")
+
 
     async def arun(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -264,5 +300,5 @@ class WorkflowOrchestrator:
             warning("工作流图验证失败: 没有指向 END 的边")
             return False
 
-        info("工作流图验证通过")
+        debug("工作流图验证通过")
         return True

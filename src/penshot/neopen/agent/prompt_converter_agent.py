@@ -544,9 +544,38 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                     continue
 
                 # 移除末尾的截断标记
-                if prompt.prompt.endswith('...') or prompt.prompt.endswith('…'):
-                    prompt.prompt = prompt.prompt.rstrip('...').rstrip('…')
-                    repair_actions.append(f"修复截断: {fragment_id}")
+                original_prompt = prompt.prompt
+                cleaned_prompt = original_prompt.rstrip('...').rstrip('…').rstrip('.').strip()
+
+                # 检查是否还有不完整的标点
+                if cleaned_prompt and cleaned_prompt[-1] in ['，', '、', '；', '：', ',', ';', ':']:
+                    cleaned_prompt = cleaned_prompt[:-1]
+
+                # 尝试从原始片段补全（如果有对话）
+                if fragment_id in fragment_map:
+                    fragment = fragment_map[fragment_id]
+                    # 检查是否有被截断的对话
+                    if fragment.description and '说' in fragment.description:
+                        # 提取完整对话
+                        import re
+                        dialogue_match = re.search(r'[‘"「](.+?)[’"」]', fragment.description)
+                        if dialogue_match:
+                            full_dialogue = dialogue_match.group(1)
+                            if full_dialogue not in cleaned_prompt:
+                                cleaned_prompt = f"{cleaned_prompt} '{full_dialogue}'"
+
+                prompt.prompt = cleaned_prompt
+                repair_actions.append(f"修复截断: {fragment_id} ({len(original_prompt)} -> {len(cleaned_prompt)}字符)")
+
+                # 额外记录原始截断问题
+                if not hasattr(instructions, '_truncation_fixes'):
+                    instructions._truncation_fixes = []
+                instructions._truncation_fixes.append({
+                    "fragment_id": fragment_id,
+                    "original_length": len(original_prompt),
+                    "fixed_length": len(cleaned_prompt),
+                    "was_truncated": len(original_prompt) != len(cleaned_prompt)
+                })
 
         # ========== 4. 修复风格不一致 ==========
         if style_issues:

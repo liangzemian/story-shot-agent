@@ -81,6 +81,11 @@ class LLMVideoSplitter(BaseVideoSplitter, BaseLLMAgent):
             "split_method": "llm_adaptive_fixed",
         }
 
+        # 统计实际分割情况
+        ai_split_shots = 0  # 使用AI处理的镜头数
+        rule_split_shots = 0  # 使用规则处理的镜头数
+        actual_split_shots = 0  # 实际产生多个片段的镜头数
+
         for shot_idx, shot in enumerate(shot_sequence.shots):
             try:
                 shot = self._fix_shot_continuity(shot, shot_idx, shot_sequence)
@@ -110,6 +115,13 @@ class LLMVideoSplitter(BaseVideoSplitter, BaseLLMAgent):
 
                     if validated_fragments:
                         current_time = validated_fragments[-1].start_time + validated_fragments[-1].duration
+
+                    ai_split_shots += 1
+                    # 记录分割结果
+                    if len(shot_fragments) > 1:
+                        actual_split_shots += 1
+
+
                 else:
                     debug(f"镜头 {shot.id} 使用规则分割")
                     rule_fragments = self.rule_splitter.split_shot(shot, current_time, fragment_id_counter)
@@ -119,6 +131,11 @@ class LLMVideoSplitter(BaseVideoSplitter, BaseLLMAgent):
 
                     if rule_fragments:
                         current_time = rule_fragments[-1].start_time + rule_fragments[-1].duration
+
+                    rule_split_shots += 1
+                    # 规则分割也可能产生多个片段
+                    if len(rule_fragments) > 1:
+                        actual_split_shots += 1
 
             except Exception as e:
                 error(f"镜头{shot.id}分割失败: {str(e)}")
@@ -143,6 +160,9 @@ class LLMVideoSplitter(BaseVideoSplitter, BaseLLMAgent):
             fragments=fragments,
             metadata={
                 "split_method": AgentMode.LLM,
+                "ai_split_shots": ai_split_shots,
+                "rule_split_shots": rule_split_shots,
+                "actual_split_shots": actual_split_shots,
                 "ai_split_count": sum(1 for f in fragments if f.metadata.get("split_by", "") == AgentMode.LLM),
                 "rule_split_count": sum(1 for f in fragments if f.metadata.get("split_by", "") == AgentMode.RULE),
                 "total_fragments": len(fragments),

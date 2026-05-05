@@ -63,7 +63,7 @@ class KnowledgeBaseViewer:
 
     def show_prompt_cache(self):
         """显示提示词模板缓存内容"""
-        cache_path = self.storage_dir / "vector_store_cache.json"
+        cache_path = self.storage_dir / "test/vector_store_cache.json"
 
         if not cache_path.exists():
             print("\n  缓存文件不存在")

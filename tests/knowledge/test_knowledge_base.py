@@ -12,7 +12,7 @@ from penshot.neopen.knowledge.llamaIndex.llama_index_knowledge import ScriptKnow
 from penshot.neopen.prompts.prompt_template_manager import PromptTemplateManager
 
 
-async def test_prompt_template_manager():
+def test_prompt_template_manager():
     """测试提示词模板管理器"""
     print("\n" + "=" * 50)
     print("测试提示词模板管理器")
@@ -36,17 +36,20 @@ async def test_prompt_template_manager():
             "scene": "咖啡馆",
             "style": "电影感",
             "quality_score": 95
-        }
+        },
+        script_id="test_script_001",
     )
 
     manager.add_template(
         prompt_text="广角镜头，城市夜景，霓虹灯闪烁，车流如织，赛博朋克风格",
+        script_id="test_script_001",
         metadata={
             "fragment_id": "test_002",
             "scene": "城市夜景",
             "style": "赛博朋克",
             "quality_score": 88
         }
+
     )
 
     # 2. 查看统计
@@ -81,7 +84,7 @@ async def test_prompt_template_manager():
     return manager
 
 
-async def test_script_knowledge_base():
+def test_script_knowledge_base():
     """测试剧本知识库"""
     print("\n" + "=" * 50)
     print("测试剧本知识库")
@@ -161,6 +164,7 @@ def test_memory_sync():
     print("\n1. 添加模板（同步到记忆层）...")
     manager.add_template(
         prompt_text="测试同步模板",
+        script_id="test_script_002",
         metadata={"test": True, "quality_score": 100}
     )
 
@@ -189,10 +193,10 @@ async def main():
 
     try:
         # 测试提示词模板管理器
-        await test_prompt_template_manager()
+        test_prompt_template_manager()
 
         # 测试剧本知识库
-        await test_script_knowledge_base()
+        test_script_knowledge_base()
 
         # 测试记忆层同步
         test_memory_sync()

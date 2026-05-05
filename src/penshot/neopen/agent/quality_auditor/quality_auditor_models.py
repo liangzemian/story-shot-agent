@@ -426,3 +426,59 @@ class QualityAuditReport(BaseModel):
         default=None,
         description="修复参数"
     )
+
+    def calculate_weighted_score(self) -> float:
+        """统一计算加权分数"""
+        if not self.violations:
+            return 100.0
+
+        severity_weights = {
+            "info": 0,
+            "warning": 5,
+            "moderate": 10,
+            "major": 25,
+            "critical": 40,
+            "error": 60,
+        }
+
+        base_score = 100.0
+        for v in self.violations:
+            severity = v.severity
+            if hasattr(severity, 'value'):
+                severity = severity.value
+            penalty = severity_weights.get(str(severity).lower(), 5)
+            base_score -= penalty
+
+        return max(0.0, min(100.0, base_score))
+
+    def determine_status_from_score(self) -> 'AuditStatus':
+        """根据分数确定状态"""
+        if self.score >= 90:
+            return AuditStatus.PASSED
+        elif self.score >= 75:
+            return AuditStatus.MINOR_ISSUES
+        elif self.score >= 60:
+            return AuditStatus.MODERATE_ISSUES
+        elif self.score >= 40:
+            return AuditStatus.MAJOR_ISSUES
+        elif self.score >= 20:
+            return AuditStatus.CRITICAL_ISSUES
+        else:
+            return AuditStatus.FAILED
+
+    def _has_severity(self, severity: SeverityLevel) -> bool:
+        """检查是否存在指定严重程度的问题"""
+        if not hasattr(self, 'stats'):
+            return False
+        severity_str = severity.value if hasattr(severity, 'value') else str(severity)
+        return self.stats.get(severity_str, 0) > 0
+
+
+@dataclass
+class RepairHistory:
+    """修复历史记录"""
+    timestamp: float
+    stage: str
+    issue_count: int
+    issues_fixed: List[str]
+    success: bool

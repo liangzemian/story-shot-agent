@@ -133,7 +133,7 @@ prompt_converter_user:
           "voice_description": "音色文字描述（英文）",
           "speed": 1,
           "pitch_shift": 0,
-          "emotion": "neutral/happy/sad/angry/tender",
+          "emotion": "neutral/happy/sad/angry/fear/tense/melancholic",
           "stability": 0.7,
           "duration_seconds": {duration},
           "sound_attributes": {{"intensity": 0.8, "reverb": 0.3}},
@@ -161,7 +161,7 @@ prompt_converter_user:
             "model_type": "AudioLDM_3",
             "voice_type": "narration",
             "duration_seconds": 3.0,
-            "emotion": "tender"
+            "emotion": "melancholic"
           }}
         }}
 

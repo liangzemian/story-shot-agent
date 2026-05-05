@@ -14,6 +14,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 from penshot.config.config_loader import ConfigLoader
 from penshot.config.config_models import (AppConfig, APIConfig, LLMConfig, EmbeddingConfig,
                                           PathsConfig, StoryboardConfig, LLMBaseConfig, EmbeddingBaseConfig, RetrieverConfig)
+from penshot.logger import info, warning
 from penshot.utils.dotenv_loader import DotEnvLoader
 from penshot.utils.path_utils import PathResolver
 
@@ -141,7 +142,24 @@ class Settings(BaseSettings):
 
 # ==================== 全局配置实例 ====================
 settings = Settings()
-os.environ["HF_ENDPOINT"] = settings.get_app_config().hf_endpoint
+# 服务启动时配置 HuggingFace 环境
+app_config = settings.get_app_config()
+
+# 1. 配置镜像端点（如果提供）
+if app_config.hf_endpoint:
+    os.environ["HF_ENDPOINT"] = app_config.hf_endpoint
+    info(f"已设置 HuggingFace 镜像端点: {app_config.hf_endpoint}")
+
+# 2. 配置 API Token（如果提供）
+if app_config.hf_token:
+    os.environ["HF_TOKEN"] = app_config.hf_token
+    info("已设置 HuggingFace API Token")
+else:
+    # 没有 Token 时设置离线模式，避免警告和无意义的重试
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    warning("未设置 HF_TOKEN，已启用离线模式，将跳过模型下载")
+
 
 # ==================== 调试辅助 ====================
 

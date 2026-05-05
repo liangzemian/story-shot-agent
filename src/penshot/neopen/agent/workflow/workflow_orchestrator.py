@@ -300,5 +300,5 @@ class WorkflowOrchestrator:
             warning("工作流图验证失败: 没有指向 END 的边")
             return False
 
-        info("工作流图验证通过")
+        debug("工作流图验证通过")
         return True

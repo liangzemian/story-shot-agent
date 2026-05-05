@@ -263,7 +263,7 @@ class MultiAgentPipeline:
 
         # 编译工作流（添加记忆器）
         compiled_graph = orchestrator.graph.compile(checkpointer=self.memory)
-        info("工作流构建完成")
+        debug("工作流构建完成")
 
         return compiled_graph
 

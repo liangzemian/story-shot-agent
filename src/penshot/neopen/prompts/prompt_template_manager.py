@@ -97,7 +97,7 @@ class PromptTemplateManager:
         self.script_kb = None
         self._init_script_kb()
 
-        info(f"提示词模板管理器初始化完成，存储目录: {self.base_storage_dir}")
+        debug(f"提示词模板管理器初始化完成，存储目录: {self.base_storage_dir}")
 
     def set_current_script(self, script_id: str) -> None:
         """

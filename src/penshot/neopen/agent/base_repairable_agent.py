@@ -133,7 +133,7 @@ class BaseRepairableAgent(BaseAgent, Generic[T, K]):
         self.current_historical_context = historical_context
         self._context_applied = True
 
-        info("应用历史上下文优化策略")
+        debug("应用历史上下文优化策略")
 
         # 1. 分析常见问题模式
         self._analyze_common_issues(historical_context)

@@ -39,7 +39,7 @@ class MemoryManager:
 
         self.set_script(script_id)
 
-        info("初始化记忆管理器")
+        debug("初始化记忆管理器")
 
     def set_script(self, script_id: str):
         """设置当前任务"""

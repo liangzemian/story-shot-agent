@@ -247,7 +247,7 @@ class LLMShotSegmenter(BaseShotSegmenter, BaseLLMAgent):
                 shots.append(shot)
                 current_time += shot.duration
 
-            info(f"场景{scene_id}生成{len(shots)}个镜头")
+            debug(f"场景{scene_id}生成{len(shots)}个镜头")
 
         except json.JSONDecodeError as e:
             error(f"解析LLM响应JSON失败: {e}")

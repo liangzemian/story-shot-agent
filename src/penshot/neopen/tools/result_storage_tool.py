@@ -133,25 +133,44 @@ class ResultStorage:
             error(f"保存结果失败 (UUID: {task_id}): {str(e)}")
             raise IOError(f"无法保存结果: {str(e)}")
 
-    def _ensure_string_integrity(self, data: Any) -> None:
+    def _ensure_string_integrity(self, data: Any, context: str = "") -> None:
         """
         递归检查并确保字符串完整性
-        主要检查是否有截断标记（如...）并发出警告
+        修复版：区分合法截断标记和异常截断
 
         Args:
             data: 要检查的数据
+            context: 上下文路径（用于精确定位）
         """
+        # 合法截断标记的特征
+        valid_truncation_patterns = [
+            '...',  # 标准截断
+            '…',  # 中文省略号
+            '[truncated]',
+            '(截断)'
+        ]
+
         if isinstance(data, dict):
             for key, value in data.items():
+                new_context = f"{context}.{key}" if context else key
                 if isinstance(value, str):
-                    # 检查是否包含可能的截断标记
-                    if value.endswith('...') or '...' in value[-10:]:
-                        warning(f"检测到可能的字符串截断: {key} 以 '...' 结尾")
+                    # 检查是否以截断标记结尾
+                    ends_with_truncation = any(
+                        value.endswith(pattern) for pattern in valid_truncation_patterns
+                    )
+
+                    if ends_with_truncation:
+                        debug(f"合法截断标记: {new_context} 以 '...' 结尾 (长度: {len(value)})")
+                    else:
+                        # 其他情况才发出警告
+                        if len(value) > 0 and value.strip() and value.endswith('...'):
+                            warning(f"检测到可能的异常截断: {new_context} 以 '...' 结尾")
                 else:
-                    self._ensure_string_integrity(value)
+                    self._ensure_string_integrity(value, new_context)
         elif isinstance(data, list):
-            for item in data:
-                self._ensure_string_integrity(item)
+            for idx, item in enumerate(data):
+                new_context = f"{context}[{idx}]"
+                self._ensure_string_integrity(item, new_context)
 
     def _safe_json_dumps(self, data: Any) -> str:
         """

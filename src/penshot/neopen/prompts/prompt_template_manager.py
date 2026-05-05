@@ -130,8 +130,9 @@ class PromptTemplateManager:
             存储目录路径
         """
         # 使用剧本ID的哈希作为子目录名，避免特殊字符问题
-        safe_name = hashlib.md5(script_id.encode('utf-8')).hexdigest()[:16]
-        script_dir = os.path.join(self.base_storage_dir, "prompt_templates", safe_name)
+        # safe_name = hashlib.md5(script_id.encode('utf-8')).hexdigest()[:16]
+        # script_dir = os.path.join(self.base_storage_dir, "prompt_templates", safe_name)
+        script_dir = os.path.join(self.base_storage_dir, "prompt_templates", script_id)
         os.makedirs(script_dir, exist_ok=True)
         return script_dir
 

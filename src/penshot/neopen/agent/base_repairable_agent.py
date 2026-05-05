@@ -213,7 +213,7 @@ class BaseRepairableAgent(BaseAgent, Generic[T, K]):
         # 质量评估
         if avg_completeness < 0.6:
             self._historical_insights["quality_level"] = "poor"
-            warning(f"历史解析质量较低[{avg_completeness}]，将启用增强验证模式")
+            info(f"历史解析质量较低[{avg_completeness}]，将启用增强验证模式")
         elif avg_completeness < 0.8:
             self._historical_insights["quality_level"] = "medium"
             info(f"历史解析质量中等[{avg_completeness}]，建议关注关键字段提取")

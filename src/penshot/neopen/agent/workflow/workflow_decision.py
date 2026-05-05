@@ -357,7 +357,7 @@ class PipelineDecision:
         """
         # 检查是否已经审查过且结果有效
         if state.domain.audit_executed and state.domain.audit_report:
-            warning("检测到可能的重复质量审查调用，使用上次结果")
+            info("检测到可能的重复质量审查调用，使用上次结果")
             return PipelineState.SUCCESS
 
         # 检查节点循环限制

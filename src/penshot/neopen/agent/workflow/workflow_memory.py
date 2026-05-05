@@ -744,6 +744,7 @@ class WorkflowMemory:
                 if prompt_text and len(prompt_text) > 20:
                     self.knowledge_manager.save_successful_prompt(
                         fragment_id=fragment_id,
+                        script_id=self.script_id,
                         prompt_text=prompt_text,
                         quality_score=stats.get("completeness_score", 85.0),
                         additional_metadata={

@@ -11,6 +11,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any, List
 
+from penshot.config.config import settings
 from penshot.logger import error, debug, info, warning
 from penshot.neopen.agent.continuity_guardian.continuity_guardian_checker import ContinuityGuardianChecker
 from penshot.neopen.agent.continuity_guardian.continuity_guardian_models import ContinuityCheckResult, ContinuityIssueType, ContinuityIssue
@@ -86,6 +87,7 @@ class WorkflowNodes:
         # 初始化提示词模板管理器
         self.knowledge_manager = PromptTemplateManager(
             embedding_model=self.embeddings,
+            storage_dir=settings.get_data_paths().get('data_embedding'),
             memory_manager=self._memory,
             min_similarity_score=0.7,
             top_k=3
@@ -763,6 +765,7 @@ class WorkflowNodes:
                         fragment_id=fragment.fragment_id,
                         prompt_text=fragment.prompt,
                         quality_score=result.score,
+                        script_id=state.input.script_id,
                         additional_metadata={
                             "scene": getattr(fragment, 'scene', ''),
                             "style": getattr(fragment, 'style', ''),

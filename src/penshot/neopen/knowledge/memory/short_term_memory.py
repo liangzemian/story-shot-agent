@@ -70,7 +70,8 @@ class ShortTermMemory:
             稳定的会话ID
         """
         # 使用剧本ID的哈希确保一致性
-        script_hash = hashlib.md5(script_id.encode('utf-8')).hexdigest()[:16]
+        # script_hash = hashlib.md5(script_id.encode('utf-8')).hexdigest()[:16]
+        script_hash = script_id[2:]
         return f"short_term_{script_hash}"
 
     def _check_redis_availability(self) -> None:

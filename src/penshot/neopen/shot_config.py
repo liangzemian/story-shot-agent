@@ -57,4 +57,9 @@ class ShotConfig(AIConfig):
     # enable_caching: bool = True  # 是否启用缓存机制，避免重复计算
     # cache_expiry_seconds: int = 3600  # 缓存过期时间
 
+    # ======================人工干预配置
+    auto_continue_on_human_intervention: bool = True  # 是否自动继续（用于自动化测试/无控制台环境）
+    human_intervention_timeout: int = 300  # 人工干预等待超时时间（秒）
+    workflow_timeout: int = 1800  # 工作流总超时时间（秒），默认30分钟
+
 

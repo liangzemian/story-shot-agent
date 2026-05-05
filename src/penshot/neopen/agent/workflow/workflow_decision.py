@@ -134,6 +134,9 @@ class PipelineDecision:
         loop_decision, loop_reason = self._check_and_increment_node_loop(state, PipelineNode.SEGMENT_SHOT)
         if loop_decision != PipelineState.SUCCESS:
             state.errors.error_messages.append(f"镜头拆分节点循环检查失败: {loop_reason}")
+            # 循环超限时，返回 NEEDS_HUMAN 而不是 FAILED
+            if loop_decision == PipelineState.FAILED:
+                return PipelineState.NEEDS_HUMAN
             return loop_decision
 
         # 检查阶段重试限制

@@ -1148,7 +1148,7 @@ class WorkflowNodes:
             info(f"进入人工干预节点，任务ID: {state.input.task_id}")
 
             # 检查是否设置了自动继续标志（用于自动化测试）
-            auto_continue = getattr(state.execution, 'auto_continue_on_human_intervention', False)
+            auto_continue = getattr(state.config, 'auto_continue_on_human_intervention', False)
 
             if auto_continue:
                 # 自动继续模式

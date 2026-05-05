@@ -110,11 +110,11 @@ class ExecutionState(BaseModel):
     # 节点循环控制
     node_max_loops: Dict[PipelineNode, int] = {
         PipelineNode.PARSE_SCRIPT: 3,
-        PipelineNode.SEGMENT_SHOT: 3,
-        PipelineNode.SPLIT_VIDEO: 3,
-        PipelineNode.CONVERT_PROMPT: 3,
+        PipelineNode.SEGMENT_SHOT: 5,
+        PipelineNode.SPLIT_VIDEO: 5,
+        PipelineNode.CONVERT_PROMPT: 5,
         PipelineNode.AUDIT_QUALITY: 3,
-        PipelineNode.CONTINUITY_CHECK: 3,
+        PipelineNode.CONTINUITY_CHECK: 5,
         PipelineNode.ERROR_HANDLER: 5,
         PipelineNode.HUMAN_INTERVENTION: 1,
     }
@@ -150,7 +150,6 @@ class ExecutionState(BaseModel):
     
     # 人工干预
     needs_human_review: bool = False
-    auto_continue_on_human_intervention: bool = False
     human_feedback: Dict[str, Any] = {}
     human_intervention_info: Dict[str, Any] = {}
 

@@ -150,9 +150,10 @@ class ExecutionState(BaseModel):
     
     # 人工干预
     needs_human_review: bool = False
+    auto_continue_on_human_intervention: bool = False
     human_feedback: Dict[str, Any] = {}
     human_intervention_info: Dict[str, Any] = {}
-    
+
     # 中止控制
     should_abort: bool = False
 

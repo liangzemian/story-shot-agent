@@ -9,7 +9,7 @@
 import time
 import traceback
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from penshot.config.config import settings
 from penshot.logger import error, debug, info, warning
@@ -1147,10 +1147,38 @@ class WorkflowNodes:
         if state.execution.needs_human_review:
             info(f"进入人工干预节点，任务ID: {state.input.task_id}")
 
-            state = self.human_intervention(state)
+            # 检查是否设置了自动继续标志（用于自动化测试）
+            auto_continue = getattr(state.execution, 'auto_continue_on_human_intervention', False)
+
+            if auto_continue:
+                # 自动继续模式
+                warning("人工干预自动继续模式已启用，跳过等待")
+                state.execution.human_feedback = {
+                    "decision": "CONTINUE",
+                    "timeout": False,
+                    "auto_decision": True,
+                    "reason": "auto_continue_enabled",
+                    "timestamp": time.time(),
+                    "raw_input": "AUTO_CONTINUE",
+                }
+            else:
+                # 执行人工干预，使用已有的 HumanIntervention 类
+                try:
+                    # 调用 HumanIntervention 实例，它会显示控制台提示并等待输入
+                    state = self.human_intervention(state)
+                except Exception as e:
+                    error(f"人工干预执行失败: {e}")
+                    # 发生异常时使用默认继续
+                    state.execution.human_feedback = {
+                        "decision": "CONTINUE",
+                        "timeout": True,
+                        "auto_decision": True,
+                        "reason": f"error: {str(e)}",
+                        "timestamp": time.time(),
+                        "raw_input": "AUTO_CONTINUE",
+                    }
 
             state.execution.needs_human_review = False
-
             decision = state.execution.human_feedback.get("decision", "CONTINUE")
             info(f"人工干预完成，决策: {decision}")
         else:
@@ -1223,6 +1251,24 @@ class WorkflowNodes:
         return graph_state
 
     # =============================================== 私有方法 ===============================================
+
+    async def _wait_for_human_with_timeout(self, timeout: int) -> Optional[Dict]:
+        """
+        等待人工输入（带超时）- 保留作为备用接口
+
+        注意：当前版本中，人工干预通过 HumanIntervention 类的同步方法实现，
+        此方法保留仅用于可能的未来扩展。
+
+        Args:
+            timeout: 超时时间（秒）
+
+        Returns:
+            人工输入结果，超时返回 None
+        """
+        # 此方法已废弃，实际人工干预由 human_intervention_node 中的
+        # self.human_intervention(state) 处理
+        debug(f"_wait_for_human_with_timeout 被调用但未实现，timeout={timeout}")
+        return None
 
     def _create_fallback_audit_report(self, state: WorkflowState) -> QualityAuditReport:
         """

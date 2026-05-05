@@ -157,6 +157,7 @@ class MultiAgentPipeline:
                 PipelineState.SUCCESS: PipelineNode.LOOP_CHECK.value,
                 PipelineState.NEEDS_RETRY: PipelineNode.SEGMENT_SHOT.value,
                 PipelineState.NEEDS_REPAIR: PipelineNode.SEGMENT_SHOT.value,
+                PipelineState.NEEDS_HUMAN: PipelineNode.HUMAN_INTERVENTION.value,
                 PipelineState.FAILED: PipelineNode.ERROR_HANDLER.value
             }
         )
@@ -183,6 +184,7 @@ class MultiAgentPipeline:
                 PipelineState.VALID: PipelineNode.LOOP_CHECK.value,
                 PipelineState.NEEDS_REPAIR: PipelineNode.CONVERT_PROMPT.value,
                 PipelineState.NEEDS_RETRY: PipelineNode.CONVERT_PROMPT.value,
+                PipelineState.NEEDS_HUMAN: PipelineNode.HUMAN_INTERVENTION.value,
                 PipelineState.FAILED: PipelineNode.ERROR_HANDLER.value
             }
         )
@@ -623,15 +625,21 @@ class MultiAgentPipeline:
 
     async def _enhanced_workflow_execution(self, initial_state: WorkflowState) -> Dict[str, Any]:
         """增强的工作流执行方法（添加统计修复）"""
-        try:
-            debug("开始增强的工作流执行...")
+        debug("开始增强的工作流执行...")
 
+        # 获取超时时间，如果没有配置则使用 None（不超时）
+        timeout = getattr(initial_state.input, 'timeout', None)
+        if timeout is None:
+            timeout = getattr(initial_state.config, 'workflow_timeout', 1800)  # 默认30分钟
+        debug(f"工作流超时设置: {timeout}秒")
+
+        try:
             final_result = await asyncio.wait_for(
                 self.output_fixer.enhanced_workflow_invoke(
                     self.workflow,
                     initial_state
                 ),
-                timeout=initial_state.input.timeout
+                timeout=timeout
             )
 
             # 添加统计修复
@@ -643,6 +651,19 @@ class MultiAgentPipeline:
 
             return self.output_fixer.parse_result_to_dict(final_result)
 
+        except asyncio.TimeoutError:
+            error(f"工作流执行超时: {timeout}秒")
+            return {
+                "success": False,
+                "error": f"工作流执行超时 ({timeout}秒)",
+                "data": None,
+                "processing_stats": {
+                    "error": "timeout",
+                    "timeout_seconds": timeout
+                },
+                "task_id": initial_state.input.task_id,
+                "workflow_status": "timeout"
+            }
         except Exception as e:
             error(f"增强工作流执行失败: {str(e)}")
 

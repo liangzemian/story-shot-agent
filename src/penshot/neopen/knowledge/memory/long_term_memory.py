@@ -24,7 +24,7 @@ class LongTermMemory:
         self.script_id = script_id
 
         # 向量存储路径
-        self.store_path = f"{config.long_term_store_path}/{script_id}"
+        self.store_path = f"{config.term_persist_path}/{script_id}"
 
         # 初始化向量存储
         self.vectorstore = Chroma(

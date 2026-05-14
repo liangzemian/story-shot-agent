@@ -62,4 +62,11 @@ class ShotConfig(AIConfig):
     human_intervention_timeout: int = 300  # 人工干预等待超时时间（秒）
     workflow_timeout: int = 1800  # 工作流总超时时间（秒），默认30分钟
 
+    # ======================检查点配置
+    checkpoint_mode: str = "auto"   # 检查点模式: auto, memory, sqlite, postgres
+    checkpoint_dir: str = "data/checkpoints"
+    postgres_uri: str = None    # PostgreSQL URI
+    max_checkpoints_per_script: int = 10    # 每脚本最多保存的检查点数量
+    checkpoint_max_connections: int = 5     # 检查点最大连接数
+    checkpoint_idle_timeout: int = 600      # 检查点空闲超时时间（秒）
 

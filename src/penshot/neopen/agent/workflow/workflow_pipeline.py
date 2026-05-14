@@ -9,18 +9,18 @@ import asyncio
 import time
 from typing import Dict, Any
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END
 
 from penshot.logger import debug, error, info, warning
 from penshot.neopen.agent.script_parser_agent import ScriptParserAgent
 from penshot.utils.log_utils import print_log_exception
 from penshot.utils.obj_utils import to_dict
+from .workflow_checkpointer import create_checkpointer
 from .workflow_decision import PipelineDecision
 from .workflow_models import AgentStage, PipelineNode, PipelineState
 from .workflow_nodes import WorkflowNodes
-from .workflow_output_fixer import WorkflowOutputFixer
 from .workflow_orchestrator import WorkflowOrchestrator
+from .workflow_output_fixer import WorkflowOutputFixer
 from .workflow_state_types import WorkflowState, InputState, ConfigState
 from ..prompt_converter_agent import PromptConverterAgent
 from ..quality_auditor_agent import QualityAuditorAgent
@@ -42,7 +42,11 @@ class MultiAgentPipeline:
         """
         self.script_id = script_id
         self.task_id = task_id
-        self.memory = MemorySaver()  # 状态记忆器
+        # 状态记忆器: 使用 SQLite 持久化 checkpoint（支持断点续传）
+        self.memory = create_checkpointer(self.script_id, self.task_id, config)
+        # 使用 MemorySaver（仅内存）
+        # from langgraph.checkpoint.memory import MemorySaver
+        # self.memory = MemorySaver()
         self.config = config or ShotConfig()
         self.llm = self.config.get_llm_by_config()
         self.embeddings = self.config.get_embed_by_config()
@@ -290,7 +294,7 @@ class MultiAgentPipeline:
                 min_prompt_length=config.min_prompt_length,
             ),
         )
-        
+
         # 设置执行状态
         initial_state.execution.current_stage = AgentStage.INIT
         # initial_state.execution.current_node = PipelineNode.PARSE_SCRIPT
@@ -468,7 +472,7 @@ class MultiAgentPipeline:
                     fragment_ids.append(f.get("fragment_id", f.get("id", "")))
                 else:
                     fragment_ids.append(getattr(f, 'fragment_id', getattr(f, 'id', "")))
-            
+
             unique_ids = set(fragment_ids)
             if len(fragment_ids) != len(unique_ids):
                 warning(f"片段ID不唯一: {len(fragment_ids)}个片段, {len(unique_ids)}个唯一ID")
@@ -487,7 +491,7 @@ class MultiAgentPipeline:
                         fragments_with_prompts.append(f)
                     if getattr(f, 'audio_prompt', None):
                         fragments_with_audio_prompts.append(f)
-            
+
             if len(fragments_with_prompts) < len(fragments) * 0.8:
                 warning(f"片段中提示词缺失较多: {len(fragments_with_prompts)}/{len(fragments)}个片段有提示词")
 
@@ -579,7 +583,6 @@ class MultiAgentPipeline:
                 "error": str(e),
                 "task_id": initial_state.input.task_id
             }
-
 
     def _validate_and_fix_fragment_stats(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """验证并修复片段统计"""
@@ -683,7 +686,6 @@ class MultiAgentPipeline:
             except Exception as e2:
                 error(f"原始调用也失败: {str(e2)}")
                 raise e
-
 
     def health_check(self) -> Dict[str, Any]:
         """检查工作流健康状态"""

@@ -124,9 +124,9 @@ full = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/neopen/story-shot-agent"
+Homepage = "https://shot.helpenx.com"
 Repository = "https://github.com/neopen/story-shot-agent"
-Documentation = "https://shot.pengline.cn"
+Documentation = "https://pengline.cn/2026/02/7e6cd67dd5ee45248f2276ac145555f5"
 Changelog = "https://github.com/neopen/story-shot-agent/releases"
 Issues = "https://github.com/neopen/story-shot-agent/issues"
 

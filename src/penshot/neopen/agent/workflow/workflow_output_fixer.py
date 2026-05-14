@@ -41,7 +41,8 @@ class WorkflowOutputFixer:
             debug(f"执行原始workflow，任务ID: {initial_state.input.task_id}")
 
             # 注意：这里需要await workflow.ainvoke
-            final_state = await workflow.ainvoke(
+            # final_state = await workflow.ainvoke(
+            final_state = workflow.invoke(
                 initial_state,
                 config={"configurable": {"thread_id": f"process_{id(initial_state)}"}}
             )

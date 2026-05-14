@@ -43,10 +43,7 @@ class MultiAgentPipeline:
         self.script_id = script_id
         self.task_id = task_id
         # 状态记忆器: 使用 SQLite 持久化 checkpoint（支持断点续传）
-        self.memory = create_checkpointer(self.script_id, self.task_id, config)
-        # 使用 MemorySaver（仅内存）
-        # from langgraph.checkpoint.memory import MemorySaver
-        # self.memory = MemorySaver()
+        self.checkpointer = create_checkpointer(self.script_id, self.task_id, config)
         self.config = config or ShotConfig()
         self.llm = self.config.get_llm_by_config()
         self.embeddings = self.config.get_embed_by_config()
@@ -266,7 +263,8 @@ class MultiAgentPipeline:
         orchestrator.validate()
 
         # 编译工作流（添加记忆器）
-        compiled_graph = orchestrator.graph.compile(checkpointer=self.memory)
+        saver = self.checkpointer.get_saver()
+        compiled_graph = orchestrator.graph.compile(checkpointer=saver)
         debug("工作流构建完成")
 
         return compiled_graph
@@ -637,6 +635,7 @@ class MultiAgentPipeline:
         debug(f"工作流超时设置: {timeout}秒")
 
         try:
+            # 添加超时时间检测
             final_result = await asyncio.wait_for(
                 self.output_fixer.enhanced_workflow_invoke(
                     self.workflow,
@@ -672,7 +671,8 @@ class MultiAgentPipeline:
 
             warning("尝试原始workflow调用作为回退...")
             try:
-                raw_state = await self.workflow.ainvoke(
+                # raw_state = await self.workflow.ainvoke(
+                raw_state = self.workflow.invoke(
                     initial_state,
                     config={"configurable": {"thread_id": f"process_{id(initial_state)}"}}
                 )
@@ -699,5 +699,5 @@ class MultiAgentPipeline:
                 "quality_auditor": self.quality_auditor is not None,
             },
             "workflow_built": self.workflow is not None,
-            "memory_available": self.memory is not None,
+            "memory_available": self.checkpointer is not None,
         }

@@ -571,7 +571,7 @@ class ScriptKnowledgeBase:
         except Exception as e:
             error(f"创建检索器失败: {script_id}, {e}")
 
-    def query_scene(self, scene_id: str, script_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def query_scene(self, scene_id: str, script_id: str) -> Optional[Dict[str, Any]]:
         """
         根据场景ID查询场景信息
 
@@ -596,7 +596,7 @@ class ScriptKnowledgeBase:
             error(f"查询场景失败: {e}")
             return None
 
-    def query_character(self, character_name: str, script_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def query_character(self, character_name: str, script_id: str) -> Optional[Dict[str, Any]]:
         """
         根据角色名称查询角色信息
 

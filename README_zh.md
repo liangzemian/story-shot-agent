@@ -6,7 +6,7 @@
 > **连续性保障**：多级记忆 + 向量检索，确保角色/场景/剧情跨片段一致  
 > **5 分钟上手**：`pip install penshot` + 3 行代码集成
 
-中文 | [English](./README.md) | [文档](https://pengline.cn/2026/02/7e6cd67dd5ee45248f2276ac145555f5/) | [PyPI](https://pypi.org/project/penshot/) | [官网](https://shot.pengline.cn/)（在线演示） |  [详细集成指南](https://pengline.cn/2026/02/df16e7d36e5d41d2ad9d7934b28f94e4/) ·  [RAG 知识库](https://pengline.cn/2026/04/1e7f1f2a5a184427b4711cc7c1903027/) · [MCP 服务](https://pengline.cn/2026/02/b027d930c0b84ba6abd24bbef7d78afc/)
+中文 | [English](./README.md) | [文档](https://pengline.cn/2026/02/7e6cd67dd5ee45248f2276ac145555f5/) | [PyPI](https://pypi.org/project/penshot/) | [官网](https://shot.helpenx.com/)（在线演示） |  [详细集成指南](https://pengline.cn/2026/02/df16e7d36e5d41d2ad9d7934b28f94e4/) ·  [RAG 知识库](https://pengline.cn/2026/04/1e7f1f2a5a184427b4711cc7c1903027/) · [MCP 服务](https://pengline.cn/2026/02/b027d930c0b84ba6abd24bbef7d78afc/)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/) [![LangGraph](https://img.shields.io/badge/built_with-LangGraph-purple)](https://langchain-ai.github.io/langgraph/) [![PyPI](https://img.shields.io/pypi/v/penshot.svg)](https://pypi.org/project/penshot/) [![Downloads](https://static.pepy.tech/badge/penshot)](https://pepy.tech/project/penshot)
 

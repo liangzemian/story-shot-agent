@@ -427,7 +427,7 @@ class ScriptKnowledgeBase:
             error(f"删除剧本失败: {script_id}, {e}")
             return False
 
-    def query(self, query_text: str, script_id: Optional[str] = None,
+    def query(self, query_text: str, script_id: str,
               search_type: str = "similarity", similarity_top_k: int = 5,
               use_rerank: bool = False, rerank_model: str = "BAAI/bge-reranker-large") -> Dict[str, Any]:
         """

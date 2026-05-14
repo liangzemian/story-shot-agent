@@ -10,7 +10,7 @@ from typing import Optional, Any, Dict, List
 
 from langchain_core.language_models import BaseLanguageModel
 
-from penshot.logger import info
+from penshot.logger import info, debug
 from penshot.neopen.knowledge.memory.long_term_memory import LongTermMemory
 from penshot.neopen.knowledge.memory.medium_term_memory import MediumTermMemory
 from penshot.neopen.knowledge.memory.memory_context import MemoryContext
@@ -28,7 +28,24 @@ class ScriptMemory:
         # 初始化三种记忆
         self.short_term = ShortTermMemory(config, script_id)
         self.medium_term = MediumTermMemory(llm, config, script_id)
-        self.long_term = LongTermMemory(config, script_id) if config.long_term_enabled else None
+
+        self.long_term = None
+        if config.long_term_enabled:
+            self.long_term = LongTermMemory(config, script_id)
+        else:
+            # 检查是否已有长期记忆数据
+            try:
+                test_long_term = LongTermMemory(config, script_id)
+                stats = test_long_term.get_stats()
+                if stats.get("document_count", 0) > 0:
+                    self.long_term = test_long_term
+                    info(f"检测到已有长期记忆数据({stats['document_count']}条)，自动启用")
+                    # 更新配置标记
+                    config.long_term_enabled = True
+                else:
+                    debug(f"长期记忆未启用且无数据: {script_id}")
+            except Exception as e:
+                debug(f"检查长期记忆数据失败: {e}")
 
         # 元数据
         self.metadata: Dict[str, Any] = {

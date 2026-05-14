@@ -7,7 +7,6 @@
 
 from collections import deque
 from typing import Optional, Any, Dict, List
-import hashlib
 
 from langchain_community.chat_message_histories import RedisChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
@@ -166,12 +165,15 @@ class ShortTermMemory:
             output_text: 输出文本
             metadata: 元数据
         """
+        debug(f"短期记忆添加: script={self.script_id}, input={input_text[:50]}...")
+
         self.memory.invoke({
             "input": input_text,
             "output": output_text,
             "metadata": metadata or {},
             "session_id": self._session_id
         })
+        debug(f"短期记忆当前大小: {len(self._message_buffer)}")
 
     def get_recent(self, n: int = None) -> List[Dict]:
         """
@@ -278,17 +280,25 @@ class ShortTermMemory:
             warning(f"清空记忆失败: {e}")
 
     def get_stats(self) -> Dict[str, Any]:
-        """
-        获取统计信息
+        """获取统计信息 - 修复版"""
+        # 确保从正确的来源获取计数
+        buffer_count = len(self._message_buffer)
 
-        Returns:
-            统计信息字典
-        """
+        # 如果缓冲区为空但 Redis 可能有数据，尝试从 Redis 加载
+        if buffer_count == 0 and self._redis_available:
+            try:
+                history = self._get_session_history(self._session_id)
+                messages = history.messages
+                redis_count = len([m for m in messages if isinstance(m, HumanMessage)])
+                buffer_count = redis_count
+            except Exception as e:
+                debug(f"从 Redis 获取计数失败: {e}")
+
         return {
             "type": "short_term",
             "script_id": self.script_id,
             "session_id": self._session_id,
-            "message_count": len(self._message_buffer),
+            "message_count": buffer_count,  # 确保正确返回
             "max_size": self.max_size,
             "ttl": self.config.short_term_ttl,
             "redis_enabled": self._redis_available,

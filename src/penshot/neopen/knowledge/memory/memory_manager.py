@@ -35,7 +35,7 @@ class MemoryManager:
         self._script_memories: Dict[str, ScriptMemory] = {}
 
         # 当前任务ID
-        self._current_script_id: Optional[str] = script_id
+        self._current_script_id: str = script_id
 
         self.set_script(script_id)
 
@@ -48,7 +48,7 @@ class MemoryManager:
             self._script_memories[script_id] = ScriptMemory(script_id, self.llm, self.config)
         debug(f"切换到任务: {script_id}")
 
-    def get_script(self, script_id: Optional[str] = None) -> ScriptMemory:
+    def get_script(self, script_id: str) -> ScriptMemory:
         """获取任务记忆实例"""
         tid = script_id or self._current_script_id
         if not tid:

@@ -7,6 +7,7 @@
 """
 from dataclasses import dataclass
 
+from penshot.config.config import settings
 from penshot.neopen.agent.base_models import VideoStyle, VideoModelType, AudioModelType
 from penshot.neopen.client.client_config import AIConfig
 
@@ -59,12 +60,13 @@ class ShotConfig(AIConfig):
 
     # ======================人工干预配置
     auto_continue_on_human_intervention: bool = True  # 是否自动继续（用于自动化测试/无控制台环境）
+    human_intervention_mode: str = "auto"  # 人工干预，自动决策：auto, 控制台交互：interactive, 回调函数：callback
     human_intervention_timeout: int = 300  # 人工干预等待超时时间（秒）
     workflow_timeout: int = 1800  # 工作流总超时时间（秒），默认30分钟
 
     # ======================检查点配置
     checkpoint_mode: str = "auto"   # 检查点模式: auto, memory, sqlite, postgres
-    checkpoint_dir: str = "data/checkpoints"
+    checkpoint_dir: str = settings.get_data_paths().get('data_checkpoint')
     postgres_uri: str = None    # PostgreSQL URI
     max_checkpoints_per_script: int = 10    # 每脚本最多保存的检查点数量
     checkpoint_max_connections: int = 5     # 检查点最大连接数

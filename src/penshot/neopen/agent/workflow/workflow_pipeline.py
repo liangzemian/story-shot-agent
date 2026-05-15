@@ -215,6 +215,7 @@ class MultiAgentPipeline:
                 PipelineState.NEEDS_RETRY: PipelineNode.CONVERT_PROMPT.value,
                 PipelineState.NEEDS_HUMAN: PipelineNode.HUMAN_INTERVENTION.value,
                 PipelineState.FAILED: PipelineNode.ERROR_HANDLER.value,
+                PipelineState.ABORT: END,
             }
         )
 

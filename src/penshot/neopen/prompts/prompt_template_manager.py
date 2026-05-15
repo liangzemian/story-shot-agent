@@ -43,6 +43,7 @@ class PromptTemplateManager:
     def __init__(
             self,
             embedding_model,
+            script_id,
             storage_dir: str = "data/embedding",
             memory_manager: Optional[MemoryManager] = None,
             chunk_size: int = 512,
@@ -77,7 +78,7 @@ class PromptTemplateManager:
         self.max_metadata_length = max_metadata_length
 
         # 当前剧本ID（用于数据隔离）
-        self._current_script_id: Optional[str] = None
+        self._current_script_id: str = script_id
 
         # 按剧本ID管理的索引和缓存
         self._indices: Dict[str, Optional[BaseIndex]] = {}
@@ -480,7 +481,7 @@ class PromptTemplateManager:
         except Exception:
             return False
 
-    def search_similar_scene(self, query_text: str, top_k: int = 3) -> List[Dict]:
+    def search_similar_scene(self, query_text: str, script_id: str, top_k: int = 3) -> List[Dict]:
         """
         搜索相似场景（用于连续性检查）
 
@@ -497,6 +498,7 @@ class PromptTemplateManager:
         try:
             result = self.script_kb.query(
                 query_text=query_text,
+                script_id=script_id,
                 search_type="similarity",
                 similarity_top_k=top_k,
                 use_rerank=True

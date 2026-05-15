@@ -9,18 +9,18 @@ import asyncio
 import time
 from typing import Dict, Any
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END
 
 from penshot.logger import debug, error, info, warning
 from penshot.neopen.agent.script_parser_agent import ScriptParserAgent
 from penshot.utils.log_utils import print_log_exception
 from penshot.utils.obj_utils import to_dict
+from .workflow_checkpointer import create_checkpointer
 from .workflow_decision import PipelineDecision
 from .workflow_models import AgentStage, PipelineNode, PipelineState
 from .workflow_nodes import WorkflowNodes
-from .workflow_output_fixer import WorkflowOutputFixer
 from .workflow_orchestrator import WorkflowOrchestrator
+from .workflow_output_fixer import WorkflowOutputFixer
 from .workflow_state_types import WorkflowState, InputState, ConfigState
 from ..prompt_converter_agent import PromptConverterAgent
 from ..quality_auditor_agent import QualityAuditorAgent
@@ -42,7 +42,8 @@ class MultiAgentPipeline:
         """
         self.script_id = script_id
         self.task_id = task_id
-        self.memory = MemorySaver()  # 状态记忆器
+        # 状态记忆器: 使用 SQLite 持久化 checkpoint（支持断点续传）
+        self.checkpointer = create_checkpointer(self.script_id, self.task_id, config)
         self.config = config or ShotConfig()
         self.llm = self.config.get_llm_by_config()
         self.embeddings = self.config.get_embed_by_config()
@@ -214,6 +215,7 @@ class MultiAgentPipeline:
                 PipelineState.NEEDS_RETRY: PipelineNode.CONVERT_PROMPT.value,
                 PipelineState.NEEDS_HUMAN: PipelineNode.HUMAN_INTERVENTION.value,
                 PipelineState.FAILED: PipelineNode.ERROR_HANDLER.value,
+                PipelineState.ABORT: END,
             }
         )
 
@@ -262,7 +264,8 @@ class MultiAgentPipeline:
         orchestrator.validate()
 
         # 编译工作流（添加记忆器）
-        compiled_graph = orchestrator.graph.compile(checkpointer=self.memory)
+        saver = self.checkpointer.get_saver()
+        compiled_graph = orchestrator.graph.compile(checkpointer=saver)
         debug("工作流构建完成")
 
         return compiled_graph
@@ -290,7 +293,7 @@ class MultiAgentPipeline:
                 min_prompt_length=config.min_prompt_length,
             ),
         )
-        
+
         # 设置执行状态
         initial_state.execution.current_stage = AgentStage.INIT
         # initial_state.execution.current_node = PipelineNode.PARSE_SCRIPT
@@ -468,7 +471,7 @@ class MultiAgentPipeline:
                     fragment_ids.append(f.get("fragment_id", f.get("id", "")))
                 else:
                     fragment_ids.append(getattr(f, 'fragment_id', getattr(f, 'id', "")))
-            
+
             unique_ids = set(fragment_ids)
             if len(fragment_ids) != len(unique_ids):
                 warning(f"片段ID不唯一: {len(fragment_ids)}个片段, {len(unique_ids)}个唯一ID")
@@ -487,7 +490,7 @@ class MultiAgentPipeline:
                         fragments_with_prompts.append(f)
                     if getattr(f, 'audio_prompt', None):
                         fragments_with_audio_prompts.append(f)
-            
+
             if len(fragments_with_prompts) < len(fragments) * 0.8:
                 warning(f"片段中提示词缺失较多: {len(fragments_with_prompts)}/{len(fragments)}个片段有提示词")
 
@@ -580,7 +583,6 @@ class MultiAgentPipeline:
                 "task_id": initial_state.input.task_id
             }
 
-
     def _validate_and_fix_fragment_stats(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """验证并修复片段统计"""
         try:
@@ -634,6 +636,7 @@ class MultiAgentPipeline:
         debug(f"工作流超时设置: {timeout}秒")
 
         try:
+            # 添加超时时间检测
             final_result = await asyncio.wait_for(
                 self.output_fixer.enhanced_workflow_invoke(
                     self.workflow,
@@ -669,7 +672,8 @@ class MultiAgentPipeline:
 
             warning("尝试原始workflow调用作为回退...")
             try:
-                raw_state = await self.workflow.ainvoke(
+                # raw_state = await self.workflow.ainvoke(
+                raw_state = self.workflow.invoke(
                     initial_state,
                     config={"configurable": {"thread_id": f"process_{id(initial_state)}"}}
                 )
@@ -684,7 +688,6 @@ class MultiAgentPipeline:
                 error(f"原始调用也失败: {str(e2)}")
                 raise e
 
-
     def health_check(self) -> Dict[str, Any]:
         """检查工作流健康状态"""
         return {
@@ -697,5 +700,5 @@ class MultiAgentPipeline:
                 "quality_auditor": self.quality_auditor is not None,
             },
             "workflow_built": self.workflow is not None,
-            "memory_available": self.memory is not None,
+            "memory_available": self.checkpointer is not None,
         }

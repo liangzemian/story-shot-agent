@@ -87,6 +87,7 @@ class WorkflowNodes:
         # 初始化提示词模板管理器
         self.knowledge_manager = PromptTemplateManager(
             embedding_model=self.embeddings,
+            script_id=self.script_id,
             storage_dir=settings.get_data_paths().get('data_embedding'),
             memory_manager=self._memory,
             min_similarity_score=0.7,
@@ -960,7 +961,7 @@ class WorkflowNodes:
                 enhanced_issues = []
                 for issue in continuity_issues:
                     issue_desc = getattr(issue, 'description', str(issue))
-                    similar_scenes = self.knowledge_manager.search_similar_scene(issue_desc, top_k=2)
+                    similar_scenes = self.knowledge_manager.search_similar_scene(issue_desc,script_id=state.input.script_id, top_k=2)
                     if similar_scenes:
                         if hasattr(issue, 'historical_solutions'):
                             issue.historical_solutions = similar_scenes

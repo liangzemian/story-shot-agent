@@ -60,16 +60,27 @@ class ScriptMemory:
         """添加记忆"""
         self.metadata["last_accessed"] = datetime.now().isoformat()
 
-        if level == MemoryLevel.SHORT_TERM:
-            self.short_term.add(input_text, output_text, metadata)
-        elif level == MemoryLevel.MEDIUM_TERM:
+        # 始终添加到短期记忆
+        self.short_term.add(input_text, output_text, metadata)
+
+        # 根据级别或重要性决定是否流转到中期/长期
+        if level == MemoryLevel.MEDIUM_TERM:
             self.medium_term.add(input_text, output_text, metadata)
         elif level == MemoryLevel.LONG_TERM and self.long_term:
             combined = f"问题: {input_text}\n回答: {output_text}"
             self.long_term.add(combined, metadata)
         else:
-            self.short_term.add(input_text, output_text, metadata)
-            self.medium_term.add(input_text, output_text, metadata)
+            # 自动流转：重要的短期记忆提升到中期
+            if metadata and metadata.get("important", False):
+                self.medium_term.add(input_text, output_text, metadata)
+
+            # 达到一定数量后，压缩到中期记忆
+            short_term_stats = self.short_term.get_stats()
+            if short_term_stats.get("message_count", 0) >= self.short_term.max_size * 0.8:
+                # 将短期记忆摘要添加到中期
+                recent = self.short_term.get_recent(5)
+                summary_content = "\n".join([f"Q: {m['content']}\nA: {m.get('output', '')}" for m in recent])
+                self.medium_term.add("short_term_summary", summary_content, {"auto_summary": True})
 
     def add_stage(self, stage_name: str, content: str, metadata: Optional[Dict] = None):
         """添加阶段记忆（特殊处理）"""

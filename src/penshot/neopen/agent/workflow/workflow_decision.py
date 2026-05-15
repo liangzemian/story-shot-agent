@@ -464,12 +464,19 @@ class PipelineDecision:
             AuditStatus.NEEDS_REVIEW: PipelineState.VALID,
         }
 
-        decision = decision_map.get(report.status, PipelineState.NEEDS_RETRY if can_retry else PipelineState.FAILED)
+        decision = decision_map.get(report.status, PipelineState.NEEDS_RETRY if can_retry else PipelineState.NEEDS_HUMAN)
 
         # 如果决定重试，增加重试计数
         if decision == PipelineState.NEEDS_RETRY:
             state = self._increment_stage_retry(state, PipelineNode.AUDIT_QUALITY)
             info(f"质量审查需要重试: 审计状态={report.status.value}, 已重试{state.execution.stage_current_retries.get(PipelineNode.AUDIT_QUALITY, 0)}次")
+
+        # 如果配置了自动模式，将 NEEDS_HUMAN 转为 NEEDS_RETRY
+        elif decision == PipelineState.NEEDS_HUMAN:
+            auto_mode = getattr(state.input.user_config, 'human_intervention_mode', 'interactive')
+            if auto_mode == 'auto':
+                info("自动模式已启用，将 NEEDS_HUMAN 转换为 NEEDS_RETRY")
+                return PipelineState.NEEDS_RETRY
 
         info(f"质量审查决策: 审计状态={report.status.value}, 决策={decision.value}, 分数={report.score}%")
 
@@ -742,6 +749,11 @@ class PipelineDecision:
             return PipelineNode.CONVERT_PROMPT.value  # ← 已经转换为字符串
 
         elif decision_state == PipelineState.NEEDS_HUMAN:
+            auto_mode = getattr(graph_state.input.user_config, 'human_intervention_mode', 'interactive')
+            if auto_mode == 'auto':
+                info("自动模式已启用，将 NEEDS_HUMAN 转换为 NEEDS_RETRY")
+                return PipelineState.NEEDS_RETRY
+
             # 需要人工干预
             return PipelineNode.HUMAN_INTERVENTION.value  # ← 已经转换为字符串
 

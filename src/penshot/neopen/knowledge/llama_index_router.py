@@ -10,10 +10,10 @@ from typing import Dict, List, Optional, Any
 
 from penshot.logger import info, warning, error
 from penshot.neopen.agent.workflow.workflow_state_types import WorkflowState
-from penshot.neopen.knowledge.memory.memory_manager import MemoryManager
-from penshot.neopen.knowledge.memory.memory_models import MemoryLevel
 from penshot.neopen.knowledge.llamaIndex.llama_index_knowledge import ScriptKnowledgeBase
 from penshot.neopen.knowledge.llamaIndex.llama_index_retriever import DocumentRetriever
+from penshot.neopen.knowledge.memory.memory_manager import MemoryManager
+from penshot.neopen.knowledge.memory.memory_models import MemoryLevel
 
 
 class KnowledgeSource(Enum):
@@ -142,48 +142,71 @@ class KnowledgeRouter:
             )
 
     async def _vector_search(self, query: KnowledgeQuery) -> List[Dict[str, Any]]:
-        """向量检索（LlamaIndex）"""
+        """向量检索（LlamaIndex）- 修复版"""
         if not self.script_kb:
             warning("向量知识库未初始化")
             return []
 
-        try:
-            # 获取或创建检索器
-            retriever_key = f"{query.top_k}_{query.similarity_threshold}"
-            if retriever_key not in self._retrievers:
-                self.script_kb.create_retriever(
-                    search_type="similarity",
-                    similarity_top_k=query.top_k,
-                    use_rerank=True
-                )
-                self._retrievers[retriever_key] = self.script_kb.retriever
+        # 确定目标剧本ID
+        target_script_id = query.filter_script_id or self.script_kb.get_current_script()
+        if not target_script_id:
+            warning("未指定剧本ID，无法进行向量检索")
+            return []
 
-            # 执行检索
-            result = self.script_kb.query(
-                query_text=query.query_text,
+        try:
+            # 创建检索器（如果尚未创建）
+            self.script_kb.create_retriever_for_script(
+                script_id=target_script_id,
                 search_type="similarity",
                 similarity_top_k=query.top_k,
                 use_rerank=True
             )
 
+            retriever = self.script_kb.get_retriever(target_script_id)
+            if not retriever or not hasattr(retriever, 'retrieve'):
+                warning(f"检索器未就绪: {target_script_id}")
+                return []
+
+            # 执行检索
+            nodes = retriever.retrieve(query.query_text)
+
             # 格式化结果
             formatted_results = []
-            for r in result.get("results", []):
-                # 应用过滤条件
-                if query.filter_script_id:
-                    meta = r.get("metadata", {})
-                    if meta.get("script_id") != query.filter_script_id:
-                        continue
+            for i, node in enumerate(nodes):
+                # 获取元数据
+                if hasattr(node, 'node'):
+                    metadata = dict(node.node.metadata) if node.node.metadata else {}
+                    text = node.node.text if hasattr(node.node, 'text') else str(node.node)
+                    score = node.score if hasattr(node, 'score') else 0.0
+                else:
+                    metadata = {}
+                    text = str(node)
+                    score = 0.0
+
+                # 过滤：确保返回当前剧本的结果
+                if metadata.get("script_id") != target_script_id:
+                    continue
+
+                # 相似度阈值过滤
+                if score < query.similarity_threshold:
+                    continue
 
                 formatted_results.append({
-                    "content": r.get("text", ""),
-                    "score": r.get("score", 0),
+                    "content": text,
+                    "score": score,
                     "source": "vector_index",
-                    "metadata": r.get("metadata", {}),
-                    "rank": r.get("rank", 0)
+                    "metadata": metadata,
+                    "rank": i + 1
                 })
 
-            return formatted_results
+            # 按分数排序
+            formatted_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+            # 限制返回数量
+            result_count = min(len(formatted_results), query.top_k)
+            info(f"向量检索完成: 共{len(formatted_results)}个结果，返回{result_count}个")
+
+            return formatted_results[:result_count]
 
         except Exception as e:
             error(f"向量检索失败: {str(e)}")
@@ -488,6 +511,7 @@ def enhance_continuity_check_sync(
             return asyncio.run(
                 enhance_continuity_check_with_knowledge(state, knowledge_router)
             )
+
 
 # ========== 工厂函数 ==========
 

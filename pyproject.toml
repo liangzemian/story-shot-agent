@@ -8,7 +8,7 @@ version = { attr = "penshot.__version__" }
 [project]
 name = "penshot"
 version = "0.3.3"
-description = "AI agent that converts screenplays to consistent Text-to-Video prompts. Supports Sora, Runway, Kling, Veo via LangGraph & LLMs."
+description = "剧本分镜,动漫分镜,电影分镜,短剧分镜,视频分镜,剧本解析,文生视频提示词。AI agent that converts screenplays to consistent Text-to-Video prompts. Supports Sora, Runway, Kling, Veo via LangGraph & LLMs."
 
 keywords = [
     "text-to-video", "script-to-prompt", "langgraph", "llm-agent",
@@ -40,6 +40,9 @@ classifiers = [
     "Framework :: FastAPI",
 ]
 
+# ============================================================================
+# 核心依赖（必须）
+# ============================================================================
 dependencies = [
     # Web框架
     #    "fastapi>=0.104.0",
@@ -50,17 +53,16 @@ dependencies = [
     "langchain-ollama>=1.0.0",
     "langchain-chroma>=1.0.0",
     "langgraph>=1.1.4",
-    #    "langchain-deepseek>=0.1.0",
+        #    "langchain-deepseek>=0.1.0",
     #    "dashscope==1.23.9",
-
     # RAG/向量存储
     "chromadb>=1.5.6",
     "llama-index-core>=0.14.20",
     "llama-index-embeddings-langchain>=0.4.0",
-    #    "llama-index-embeddings-openai>=0.1.0",
+        #    "llama-index-embeddings-openai>=0.1.0",
     #    "llama-index-embeddings-huggingface>=0.1.0",
     #    "llama-index-embeddings-ollama>=0.1.0",
-
+    "langgraph-checkpoint-sqlite",
     # 配置与数据验证
     "pydantic>=2.11.10",
     "pydantic-settings>=2.10.1",
@@ -77,7 +79,11 @@ dependencies = [
     "colorama"
 ]
 
+# ============================================================================
+# 可选依赖分组
+# ============================================================================
 [project.optional-dependencies]
+# 开发工具
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -89,6 +95,7 @@ dev = [
     "pre-commit>=3.5.0",
 ]
 
+# 测试依赖
 test = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -96,31 +103,76 @@ test = [
     "httpx>=0.25.0",
 ]
 
+# 视频处理
 video = [
     "opencv-python>=4.8.0",
     "moviepy>=1.0.3",
     "pillow>=10.0.0",
 ]
 
+# 文档生成
 docs = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.4.0",
     "mkdocstrings[python]>=0.24.0",
 ]
 
+# API服务
+api = [
+    "fastapi>=0.104.0",
+    "aiofiles>=23.2.0",
+    "httpx>=0.25.0",
+]
+
+# 异步数据库支持
+async_db = [
+    "aiosqlite>=0.19.0",
+    "asyncpg>=0.29.0",
+]
+
+# 多LLM提供商
+llm-providers = [
+    "langchain-deepseek>=0.1.0",
+    "langchain-openai>=1.0.0",
+    "dashscope>=1.0.0",
+]
+
+# ============================================================================
+# full 组合：通过引用其他分组实现（TOML 不支持变量，但 pip 支持组合）
+# 安装时使用：pip install penshot[full]
+# ============================================================================
 full = [
+    # API服务
+    "fastapi>=0.104.0",
+    "aiofiles>=23.2.0",
+    # 异步数据库
+    "aiosqlite>=0.19.0",
+    "asyncpg>=0.29.0",
+    # 多LLM提供商
+    "langchain-deepseek>=0.1.0",
+    "langchain-openai>=1.0.0",
+    "dashscope>=1.0.0",
+    # 视频处理
     "opencv-python>=4.8.0",
     "moviepy>=1.0.3",
     "pillow>=10.0.0",
-    "aiofiles>=23.2.0",
-    "redis>=5.0.0",
-    "fastapi>=0.104.0",
+    # HTTP客户端
     "httpx>=0.25.0",
-    "requests>=2.31.0",
-    "langchain-deepseek>=0.1.0",
-    "dashscope>=1.0.0",
-    #    "celery>=5.3.0",
-    "langchain-openai>=1.0.0",
+]
+
+# ============================================================================
+# 注意：TOML 不支持变量引用，但 pip 支持组合安装
+# 用户可以通过以下方式安装组合：
+#   pip install penshot[api,async_db,llm-providers,video]
+# 或者我们提供一个 all 分组（安装所有可选依赖）
+# ============================================================================
+all = [
+    "penshot[dev,test,video,docs,api,async_db,llm-providers]",
+]
+
+# 便捷别名
+default = [
+    "penshot[api,async_db]",
 ]
 
 [project.urls]
@@ -133,7 +185,7 @@ Issues = "https://github.com/neopen/story-shot-agent/issues"
 # 注意：这里引用的是内部的Python包名 penshot
 [project.scripts]
 story-shot-agent = "penshot.cli:main"
-vs-agent = "penshot.cli:main"  # 简写别名
+vs-agent = "penshot.cli:main"
 
 # 如果使用FastAPI，可以添加一个serve命令
 [project.entry-points."console_scripts"]
@@ -166,7 +218,7 @@ penshot = [
 
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py310']
 
 [tool.isort]
 profile = "black"
@@ -183,7 +235,9 @@ disallow_untyped_defs = true
 module = [
     "langchain.*",
     "langchain_community.*",
-    #    "llamaIndex.*",
+    "langgraph.*",
+    "chromadb.*",
+    "llama_index.*",
 ]
 ignore_missing_imports = true
 
@@ -197,3 +251,4 @@ addopts = [
     "--strict-config",
     "-v",
 ]
+asyncio_mode = "auto"

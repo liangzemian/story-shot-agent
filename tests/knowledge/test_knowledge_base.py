@@ -120,7 +120,7 @@ def test_script_knowledge_base():
     # 3. 测试查询
     print("\n3. 测试查询...")
     query = "咖啡厅的场景"
-    query_result = kb.query(query, similarity_top_k=2)
+    query_result = kb.query(query, similarity_top_k=2, script_id="test_script_001")
 
     print(f"   查询: '{query}'")
     print(f"   找到 {query_result['total_results']} 个结果:")

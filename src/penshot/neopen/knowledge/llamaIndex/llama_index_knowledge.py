@@ -470,7 +470,7 @@ class ScriptKnowledgeBase:
 
             # 创建检索器（如需要）
             if target_id not in self._retrievers:
-                self._create_retriever_for_script(target_id, search_type, similarity_top_k, use_rerank, rerank_model)
+                self.create_retriever_for_script(target_id, search_type, similarity_top_k, use_rerank, rerank_model)
 
             retriever = self._retrievers.get(target_id)
             if not retriever or not hasattr(retriever, 'retrieve'):
@@ -522,7 +522,7 @@ class ScriptKnowledgeBase:
                 "error": str(e)
             }
 
-    def _create_retriever_for_script(self, script_id: str, search_type: str = "similarity",
+    def create_retriever_for_script(self, script_id: str, search_type: str = "similarity",
                                      similarity_top_k: int = 5, use_rerank: bool = False,
                                      rerank_model: str = "BAAI/bge-reranker-large"):
         """为指定剧本创建检索器"""
@@ -672,6 +672,111 @@ class ScriptKnowledgeBase:
         for script_id in list(self.parsed_results.keys()):
             self.remove_script(script_id)
         info("已清空所有剧本")
+
+    # 在 ScriptKnowledgeBase 类末尾添加
+
+    def create_retriever(self,
+                         script_id: Optional[str] = None,
+                         search_type: str = "similarity",
+                         similarity_top_k: int = 5,
+                         use_rerank: bool = False) -> Optional[BaseRetriever]:
+        """
+        创建检索器（公共接口）
+
+        使用示例:
+            retriever = kb.create_retriever(script_id="script_001", search_type="mmr")
+            nodes = retriever.retrieve("查询文本")
+
+        Args:
+            script_id: 剧本ID，不指定则使用当前剧本
+            search_type: 搜索类型 (similarity/mmr)
+            similarity_top_k: 返回结果数量
+            use_rerank: 是否启用重排序
+
+        Returns:
+            检索器实例
+        """
+        target_id = script_id or self._current_script_id
+        if not target_id:
+            warning("未指定剧本ID，无法创建检索器")
+            return None
+
+        # 确保索引存在
+        self._ensure_script_index(target_id)
+
+        # 创建检索器
+        self.create_retriever_for_script(
+            script_id=target_id,
+            search_type=search_type,
+            similarity_top_k=similarity_top_k,
+            use_rerank=use_rerank
+        )
+
+        return self._retrievers.get(target_id)
+
+
+    def get_retriever(self, script_id: str) -> Optional[BaseRetriever]:
+        """
+        获取指定剧本的检索器
+
+        Args:
+            script_id: 剧本ID
+
+        Returns:
+            检索器实例
+        """
+        # 确保索引存在
+        self._ensure_script_index(script_id)
+
+        # 如果检索器不存在，创建默认检索器
+        if script_id not in self._retrievers:
+            self.create_retriever_for_script(
+                script_id=script_id,
+                search_type="similarity",
+                similarity_top_k=5,
+                use_rerank=False
+            )
+
+        return self._retrievers.get(script_id)
+
+    def get_current_retriever(self) -> Optional[BaseRetriever]:
+        """
+        获取当前剧本的检索器
+        Returns:
+            检索器实例
+        """
+        target_id = self._current_script_id
+        if not target_id:
+            warning("未设置当前剧本，无法获取检索器")
+            return None
+
+        return self.get_retriever(target_id)
+
+
+    def query_structured(self, query_type: str, query_value: str,
+                         script_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        结构化查询（统一入口）
+
+        Args:
+            query_type: 查询类型 (scene, character)
+            query_value: 查询值（场景ID或角色名）
+            script_id: 剧本ID
+
+        Returns:
+            查询结果
+        """
+        target_id = script_id or self._current_script_id
+        if not target_id:
+            return None
+
+        if query_type == "scene":
+            return self.query_scene(query_value, target_id)
+        elif query_type == "character":
+            return self.query_character(query_value, target_id)
+        else:
+            warning(f"不支持的查询类型: {query_type}")
+            return None
 
     def _add_documents_to_index(self, documents: List[Document], script_id: str):
         """添加文档到指定剧本的索引"""

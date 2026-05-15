@@ -165,3 +165,4 @@ class PathsConfig(BaseModel):
     data_embedding: str = Field(default="data/embedding")
     data_template: str = Field(default="data/template")
     data_model: str = Field(default="data/models")
+    data_checkpoint: str = Field(default="data/checkpoints")

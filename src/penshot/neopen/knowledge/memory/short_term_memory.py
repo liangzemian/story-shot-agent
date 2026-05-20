@@ -4,8 +4,9 @@
 @Author: HiPeng
 @Time: 2026/4/1
 """
-
+import json
 from collections import deque
+from pathlib import Path
 from typing import Optional, Any, Dict, List
 
 from langchain_community.chat_message_histories import RedisChatMessageHistory
@@ -54,6 +55,13 @@ class ShortTermMemory:
 
         # 创建带记忆的链
         self.memory = self._create_memory_chain()
+
+        # 文件持久化路径（Redis 不可用时使用）
+        self._persist_path = None
+        if not self._redis_available and config.term_persist_path:
+            self._persist_path = Path(config.term_persist_path) / script_id / "short_term.json"
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            self._load_from_file()
 
         info(f"初始化短期记忆: script={script_id}, session_id={self._session_id}, "
              f"size={config.short_term_size}, redis_enabled={self._redis_available}")
@@ -174,6 +182,8 @@ class ShortTermMemory:
             "session_id": self._session_id
         })
         debug(f"短期记忆当前大小: {len(self._message_buffer)}")
+
+        self._save_to_file()  # 添加持久化
 
     def get_recent(self, n: int = None) -> List[Dict]:
         """
@@ -325,3 +335,28 @@ class ShortTermMemory:
         except Exception as e:
             warning(f"获取 Redis keys 失败: {e}")
             return []
+
+    def _save_to_file(self) -> None:
+        """保存到文件"""
+        if not self._persist_path:
+            return
+
+        try:
+            data = list(self._message_buffer)
+            with open(self._persist_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            warning(f"保存短期记忆到文件失败: {e}")
+
+    def _load_from_file(self) -> None:
+        """从文件加载"""
+        if not self._persist_path or not self._persist_path.exists():
+            return
+
+        try:
+            with open(self._persist_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self._message_buffer.extend(data)
+            info(f"从文件加载短期记忆: {len(data)} 条")
+        except Exception as e:
+            warning(f"加载短期记忆文件失败: {e}")

@@ -83,8 +83,7 @@ class RetrieverConfig(BaseModel):
     """检索器配置类"""
     rerank_enabled: bool = Field(default=False)
     rerank_model_name: str = Field(default="BAAI/bge-reranker-large")
-    rerank_model_local_path: str = Field(default="")
-
+    rerank_model_local_path: str = Field(default="data/models")
     search_type: str = Field(default="similarity")
     similarity_top_k: int = Field(default=5)
 

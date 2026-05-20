@@ -24,7 +24,7 @@ class LLMShotSegmenter(BaseShotSegmenter, BaseLLMAgent):
     """基于LLM的分镜拆分器"""
 
     def __init__(self, llm_client, config: Optional[ShotConfig]):
-        super().__init__(config)
+        super().__init__(llm_client, config)
         self.llm_client = llm_client
         self.current_repair_params = None
         self.current_historical_context  = None
@@ -140,7 +140,7 @@ class LLMShotSegmenter(BaseShotSegmenter, BaseLLMAgent):
 
         debug(f"场景{scene.id}分镜提示词长度: {len(user_prompt)}字符")
 
-        response = self._call_llm_chat_with_retry(self.llm_client, self.system_prompt, user_prompt)
+        response = self._call_llm_chat_with_retry(self.system_prompt, user_prompt)
         shots_data = self._parse_ai_response(response, scene.id, start_time, shot_offset)
 
         return shots_data

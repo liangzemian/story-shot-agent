@@ -20,15 +20,15 @@ from penshot.neopen.tools.json_parser_tool import parse_json_response
 
 class LLMScriptParser(BaseScriptParser, BaseLLMAgent):
 
-    def __init__(self, llm, config: AIConfig = None):
+    def __init__(self, llm_client, config: AIConfig = None):
         """
         初始化剧本解析智能体
 
         Args:
-            llm: 语言模型实例（推荐GPT-4o）
+            llm_client: 语言模型实例（推荐GPT-4o）
         """
+        super().__init__(llm_client, config)
         self.config = config
-        self.llm = llm
 
         self.system_prompts = {
             ScriptType.NATURAL_LANGUAGE: self._get_natural_language_prompt(),
@@ -91,7 +91,7 @@ class LLMScriptParser(BaseScriptParser, BaseLLMAgent):
         debug(f"AI用户提示词（摘要）: {user_prompt[:150]}...")
 
         # 调用LLM
-        parsed_data = self._call_llm_parse_with_retry(self.llm, system_prompt, user_prompt)
+        parsed_data = self._call_llm_parse_with_retry(system_prompt, user_prompt)
 
         # 转换为模型对象
         parsed_script = self._build_parsed_script(parsed_data)

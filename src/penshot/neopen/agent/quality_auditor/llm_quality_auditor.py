@@ -25,7 +25,7 @@ class LLMQualityAuditor(BaseQualityAuditor, BaseLLMAgent):
     """LLM深度审查器 - 只负责LLM审查，不合并结果"""
 
     def __init__(self, llm_client, config: Optional[ShotConfig]):
-        super().__init__(config)
+        super().__init__(llm_client, config)
         self.llm_client = llm_client
         self.last_llm_result = None
         self.last_audit_time = 0
@@ -83,7 +83,7 @@ class LLMQualityAuditor(BaseQualityAuditor, BaseLLMAgent):
 
         try:
             response = self._call_llm_parse_with_retry(
-                self.llm_client, system_prompt, user_prompt, max_retries=2
+                system_prompt, user_prompt, max_retries=2
             )
 
             if isinstance(response, str):

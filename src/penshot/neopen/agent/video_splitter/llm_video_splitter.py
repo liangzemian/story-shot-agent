@@ -26,7 +26,7 @@ class LLMVideoSplitter(BaseVideoSplitter, BaseLLMAgent):
     """基于LLM的视频智能分割器 - 从ParsedScript获取全局信息"""
 
     def __init__(self, llm_client, config: Optional[ShotConfig]):
-        super().__init__(config)
+        super().__init__(llm_client, config)
         self.llm_client = llm_client
         self.rule_splitter = RuleVideoSplitter(config)
         self.split_cache = {}
@@ -472,7 +472,7 @@ class LLMVideoSplitter(BaseVideoSplitter, BaseLLMAgent):
 
         try:
             llm_response = self._call_llm_parse_with_retry(
-                self.llm_client, system_prompt, user_prompt
+                system_prompt, user_prompt
             )
 
             response_time = time.time() - start_time

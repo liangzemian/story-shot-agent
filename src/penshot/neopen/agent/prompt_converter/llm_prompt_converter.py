@@ -33,8 +33,9 @@ from penshot.utils.str_count_utils import only_count_en
 class LLMPromptConverter(BasePromptConverter, BaseLLMAgent):
     """基于LLM的提示词转换器 - 音频参数由LLM直接从CharacterInfo解析"""
 
-    def __init__(self, llm_client, config: Optional[ShotConfig]):
-        super().__init__(llm_client, config)
+    def __init__(self, llm_client, config: ShotConfig):
+        BasePromptConverter.__init__(self, config)
+        BaseLLMAgent.__init__(self, llm_client, config)
         self.llm_client = llm_client
         self.parsed_script = None
         self.global_metadata = None

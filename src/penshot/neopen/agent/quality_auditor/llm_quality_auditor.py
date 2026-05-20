@@ -25,7 +25,8 @@ class LLMQualityAuditor(BaseQualityAuditor, BaseLLMAgent):
     """LLM深度审查器 - 只负责LLM审查，不合并结果"""
 
     def __init__(self, llm_client, config: Optional[ShotConfig]):
-        super().__init__(llm_client, config)
+        BaseQualityAuditor.__init__(self, config)
+        BaseLLMAgent.__init__(self, llm_client, config)
         self.llm_client = llm_client
         self.last_llm_result = None
         self.last_audit_time = 0

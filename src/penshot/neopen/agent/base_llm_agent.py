@@ -21,9 +21,7 @@ from penshot.neopen.tools.json_parser_tool import parse_json_response
 
 class BaseLLMAgent(BaseAgent):
 
-    def __init__(self, llm_client, config: AIConfig, cache_enabled: bool = False):
-        super().__init__(config)
-        self._cache_enabled = cache_enabled
+    def __init__(self, llm_client, config: AIConfig):
         self.llm = llm_client
         self.config = config or {}
         # self._cache = LLMCache()

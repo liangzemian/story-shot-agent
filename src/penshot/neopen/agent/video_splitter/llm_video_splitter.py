@@ -26,7 +26,8 @@ class LLMVideoSplitter(BaseVideoSplitter, BaseLLMAgent):
     """基于LLM的视频智能分割器 - 从ParsedScript获取全局信息"""
 
     def __init__(self, llm_client, config: Optional[ShotConfig]):
-        super().__init__(llm_client, config)
+        BaseVideoSplitter.__init__(self, config)
+        BaseLLMAgent.__init__(self, llm_client, config)
         self.llm_client = llm_client
         self.rule_splitter = RuleVideoSplitter(config)
         self.split_cache = {}

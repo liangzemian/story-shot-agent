@@ -89,6 +89,12 @@ class AIConfig:
     cinematic_knowledge: bool = Field(default=True, description="注入影视领域知识")
     pacing_principles: bool = Field(default=True, description="启用节奏控制原则")
 
+    # ====================== LLM 缓存配置 ======================
+    enable_llm_cache: bool = False  # 默认关闭，因为 LLM 输出不稳定
+    cache_ttl_seconds: int = 300  # 5分钟短缓存
+    cache_mode: str = "strict"  # strict: 完全相同输入; fuzzy: 相似输入
+    cache_only_for: list = None  # 指定哪些 Agent 使用缓存，如 ["video_splitter"]
+
     #
     def has_llm_config(self):
         return self.llm and self.llm.model_name and self.llm.base_url

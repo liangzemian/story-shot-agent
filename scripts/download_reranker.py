@@ -1,7 +1,7 @@
 """
 @FileName: download_reranker.py
 @Description: 自动下载 BAAI/bge-reranker-large 模型
-            需要安装 pip install sentence-transformers
+            需要安装 pip install sentence-transformers  或 pip install modelscope
 @Author: HiPeng
 @Time: 2026/5/20 22:30
 """
@@ -30,6 +30,7 @@ model_name = "BAAI/bge-reranker-large"
 
 def download_model_by_snapshot():
     from huggingface_hub import snapshot_download
+    # pip install modelscope
 
     try:
         # 执行下载，这里显式设置了 tqdm_class，确保能看到进度条

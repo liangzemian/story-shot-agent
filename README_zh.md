@@ -27,7 +27,6 @@
 
 ------
 
-
 ## 核心功能
 
 | 特性             | 说明                                                         |
@@ -45,6 +44,10 @@
 ------
 
 ## 系统架构与创作流程
+
+![PenShot 架构演进路线图之基础阶段](./assets/imgs/PenShot%20%E6%9E%B6%E6%9E%84%E6%BC%94%E8%BF%9B%E8%B7%AF%E7%BA%BF%E5%9B%BE%E4%B9%8B%E5%9F%BA%E7%A1%80%E9%98%B6%E6%AE%B5.webp)
+
+基础架构 UML：
 
 ```mermaid
 flowchart TD

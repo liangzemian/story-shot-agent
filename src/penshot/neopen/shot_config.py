@@ -59,8 +59,8 @@ class ShotConfig(AIConfig):
     # cache_expiry_seconds: int = 3600  # 缓存过期时间
 
     # ======================人工干预配置
-    auto_continue_on_human_intervention: bool = True  # 是否自动继续（用于自动化测试/无控制台环境）
-    human_intervention_mode: str = "auto"  # 人工干预，自动决策：auto, 控制台交互：interactive, 回调函数：callback
+    auto_continue_on_human_intervention: bool = False  # 是否自动继续（用于自动化测试/无控制台环境）
+    human_intervention_mode: str = "interactive"  # 人工干预，自动决策：auto, 控制台交互：interactive, 回调函数：callback
     human_intervention_timeout: int = 300  # 人工干预等待超时时间（秒）
     workflow_timeout: int = 1800  # 工作流总超时时间（秒），默认30分钟
 
@@ -72,3 +72,28 @@ class ShotConfig(AIConfig):
     checkpoint_max_connections: int = 5     # 检查点最大连接数
     checkpoint_idle_timeout: int = 600      # 检查点空闲超时时间（秒）
 
+    def __post_init__(self):
+        """配置参数验证"""
+        # 时长参数验证
+        if self.max_fragment_duration <= self.min_fragment_duration:
+            raise ValueError(
+                f"max_fragment_duration ({self.max_fragment_duration}) "
+                f"必须大于 min_fragment_duration ({self.min_fragment_duration})"
+            )
+
+        if self.max_shot_duration <= self.min_shot_duration:
+            raise ValueError(
+                f"max_shot_duration ({self.max_shot_duration}) "
+                f"必须大于 min_shot_duration ({self.min_shot_duration})"
+            )
+
+        # 提示词长度验证
+        if self.max_prompt_length <= self.min_prompt_length:
+            raise ValueError(
+                f"max_prompt_length ({self.max_prompt_length}) "
+                f"必须大于 min_prompt_length ({self.min_prompt_length})"
+            )
+
+        # 循环次数验证
+        if self.max_total_loops < 1:
+            raise ValueError(f"max_total_loops 必须 >= 1，当前为 {self.max_total_loops}")

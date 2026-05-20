@@ -34,6 +34,7 @@ class ScriptKnowledgeBase:
 
     def __init__(self,
                  embeddings: Optional[BaseEmbedding],
+                 script_id: str,
                  storage_dir: str = settings.get_data_paths().get("data_embedding"),
                  chunk_size: int = 512,
                  chunk_overlap: int = 20):
@@ -65,7 +66,7 @@ class ScriptKnowledgeBase:
         self._offline_mode = False
 
         # 当前激活的 script_id（用于默认操作）
-        self._current_script_id: Optional[str] = None
+        self._current_script_id: str = script_id
 
         # 初始化存储
         if self.storage_dir:
@@ -428,8 +429,8 @@ class ScriptKnowledgeBase:
             return False
 
     def query(self, query_text: str, script_id: str,
-              search_type: str = "similarity", similarity_top_k: int = 5,
-              use_rerank: bool = False, rerank_model: str = "BAAI/bge-reranker-large") -> Dict[str, Any]:
+              search_type: str = None, similarity_top_k: int = None,
+              use_rerank: bool = False, rerank_model: str = None) -> Dict[str, Any]:
         """
         查询知识库 - 支持按 script_id 隔离
 
@@ -522,9 +523,9 @@ class ScriptKnowledgeBase:
                 "error": str(e)
             }
 
-    def create_retriever_for_script(self, script_id: str, search_type: str = "similarity",
-                                     similarity_top_k: int = 5, use_rerank: bool = False,
-                                     rerank_model: str = "BAAI/bge-reranker-large"):
+    def create_retriever_for_script(self, script_id: str, search_type: str = None,
+                                     similarity_top_k: int = None, use_rerank: bool = False,
+                                     rerank_model: str = None):
         """为指定剧本创建检索器"""
         index = self._get_index(script_id)
         if not index:
@@ -544,13 +545,13 @@ class ScriptKnowledgeBase:
                 )
 
             # 重排序仅在非离线模式时启用
-            if use_rerank and not self._offline_mode:
+            retriever_config = settings.get_retriever_config()
+            if use_rerank or retriever_config.rerank_enabled:
                 try:
-                    retriever_config = settings.get_retriever_config()
                     if retriever_config.rerank_model_local_path and os.path.exists(retriever_config.rerank_model_local_path):
                         model_to_use = retriever_config.rerank_model_local_path
                     else:
-                        model_to_use = rerank_model
+                        model_to_use = retriever_config.rerank_model_name or rerank_model
 
                     from llama_index.core.postprocessor import SentenceTransformerRerank
                     rerank = SentenceTransformerRerank(
@@ -558,8 +559,8 @@ class ScriptKnowledgeBase:
                         top_n=min(3, similarity_top_k)
                     )
                     retriever = index.as_retriever(
-                        retriever_mode=search_type,
-                        similarity_top_k=similarity_top_k,
+                        retriever_mode=search_type or retriever_config.search_type,
+                        similarity_top_k=similarity_top_k or retriever_config.similarity_top_k,
                         node_postprocessors=[rerank]
                     )
                 except Exception as e:
@@ -673,12 +674,11 @@ class ScriptKnowledgeBase:
             self.remove_script(script_id)
         info("已清空所有剧本")
 
-    # 在 ScriptKnowledgeBase 类末尾添加
 
     def create_retriever(self,
                          script_id: Optional[str] = None,
-                         search_type: str = "similarity",
-                         similarity_top_k: int = 5,
+                         search_type: str = None,
+                         similarity_top_k: int = None,
                          use_rerank: bool = False) -> Optional[BaseRetriever]:
         """
         创建检索器（公共接口）

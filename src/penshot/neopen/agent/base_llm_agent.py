@@ -5,18 +5,28 @@
 @Github: https://github.com/neopen/story-shot-agent
 @Time: 2026/1/9 21:23
 """
+import hashlib
 import time
 from abc import abstractmethod
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from penshot.neopen.agent.base_agent import BaseAgent
 from penshot.neopen.agent.script_parser.script_parser_models import GlobalMetadata, ParsedScript
+from penshot.neopen.client.client_config import AIConfig
 from penshot.neopen.client.client_factory import llm_chat_complete
 from penshot.neopen.prompts.prompt_load_manager import prompt_manager
 from penshot.neopen.tools.json_parser_tool import parse_json_response
 
 
 class BaseLLMAgent(BaseAgent):
+
+    def __init__(self, llm_client, config: AIConfig):
+        self.llm = llm_client
+        self.config = config or {}
+        # self._cache = LLMCache()
+        self._cache = {}
+        self._cache_enabled = getattr(config, 'enable_llm_cache', True)
 
     def _get_prompt_template(self, key_name) -> str:
         """创建LLM提示词模板"""
@@ -43,14 +53,14 @@ class BaseLLMAgent(BaseAgent):
     def process(self, *args, **kwargs) -> Optional[str]:
         pass
 
-    def _call_llm_parse_with_retry(self, llm, system_prompt: str, user_prompt, max_retries: int = 2) -> Optional[Dict[str, Any]]:
+    def _call_llm_parse_with_retry(self, system_prompt: str, user_prompt, max_retries: int = 2) -> Optional[Dict[str, Any]]:
         """
             调用LLM，返回转换后的对象（支持重试）
             返回 dict
         """
-        return self._parse_llm_response(self._call_llm_chat_with_retry(llm, system_prompt, user_prompt, max_retries))
+        return self._parse_llm_response(self._call_llm_chat_with_retry(system_prompt, user_prompt, max_retries))
 
-    def _call_llm_chat_with_retry(self, llm, system_prompt: str, user_prompt, max_retries: int = 2) -> Optional[str]:
+    def _call_llm_chat_with_retry(self, system_prompt: str, user_prompt, max_retries: int = 2) -> Optional[str]:
         """
             调用LLM，直接返回json字符串（支持重试）
         """
@@ -61,12 +71,58 @@ class BaseLLMAgent(BaseAgent):
 
         for attempt in range(max_retries):
             try:
-                return llm_chat_complete(llm, messages)
+                return llm_chat_complete(self.llm, messages)
 
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise Exception(f"LLM调用失败: {e}")
                 time.sleep(1)
+
+
+    def _call_llm_with_cache(self, prompt: str, system_prompt: str = "", max_retries: int = 2,
+                             temperature: float = 0.1,
+                             force_refresh: bool = False,
+                             cache_key_extra: str = "") -> str:
+        """
+        带缓存的 LLM 调用
+
+        Args:
+            force_refresh: 强制刷新，忽略缓存
+            cache_key_extra: 额外的缓存键标识（如任务ID）
+        """
+        # 如果缓存未启用或强制刷新，直接调用
+        if not self.config.enable_llm_cache or force_refresh:
+            return self._call_llm_chat_with_retry(system_prompt, prompt, max_retries)
+
+        # 生成缓存键（包含任务信息避免跨任务污染）
+        task_id = getattr(self, 'task_id', 'default')
+        cache_key = hashlib.md5(
+            f"{prompt}|{system_prompt}|{temperature}|{task_id}{cache_key_extra}".encode()
+        ).hexdigest()
+
+        # 检查缓存
+        if cache_key in self._cache:
+            value, timestamp, _ = self._cache[cache_key]
+            if datetime.now() - timestamp < timedelta(seconds=self.config.cache_ttl_seconds):
+                return value
+            del self._cache[cache_key]
+
+        # 调用 LLM
+        result = self._call_llm_chat_with_retry(system_prompt, prompt, max_retries)
+
+        # 存入缓存
+        self._cache[cache_key] = (result, datetime.now(), 1.0)
+        return result
+
+    def clear_cache(self, pattern: str = None):
+        """清空缓存"""
+        if pattern is None:
+            self._cache.clear()
+        else:
+            keys_to_remove = [k for k in self._cache if pattern in k]
+            for k in keys_to_remove:
+                del self._cache[k]
+
 
     def _call_llm_with_retry(self, llm, prompt: str, max_retries: int = 2) -> Optional[Any]:
         """调用LLM，支持重试"""

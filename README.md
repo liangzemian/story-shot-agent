@@ -50,66 +50,11 @@ A multi-agent collaborative screenplay storyboarding system that splits scripts 
 
 ## System Architecture & Workflow
 
-```mermaid
-flowchart TD
-    subgraph Input [Input Layer]
-        A1[Client / Upstream Agent] --> A2[REST API / MCP / A2A]
-        A2 --> A3[Task Manager]
-    end
+![penshot-Roadmap](./assets/imgs/penshot-Roadmap.webp)
 
-    subgraph Core [LangGraph Multi-Agent Core Workflow]
-        direction TB
-        
-        P1[Script Parser Agent] --> P2[Storyboard Generator Agent]
-        P2 --> P3[Video Splitter Agent]
-        P3 --> P4[Prompt Converter Agent]
-        P4 --> P5[Quality Auditor Agent]
-        P5 --> P6[Continuity Guardian Agent]
-        P6 --> P7[Auxiliary Generator Agent<br/>Three-view/Background/Keyframe]
-        
-        subgraph Control [Control Nodes]
-            C1[Loop Check] --> C2[Error Handling]
-            C2 --> C3[Human Intervention]
-            C3 --> C4[Result Generation]
-        end
-        
-        P1 -.->|Retry/Fix| Control
-        P2 -.->|Retry/Fix| Control
-        P3 -.->|Retry/Fix| Control
-        P4 -.->|Retry/Fix| Control
-        P5 -.->|Retry/Fix| Control
-        P6 -.->|Retry/Fix| Control
-        Control -.->|Routing Decision| P1
-    end
+**Architectural UML:**
 
-    subgraph Memory [Memory Layer]
-        M1[(Short-term Memory)]
-        M2[(Medium-term Memory)]
-        M3[(Long-term Memory)]
-        M4[(Vector Database<br/>Chroma)]
-        
-        M1 <--> Core
-        M2 <--> Core
-        M3 <--> Core
-        M4 <--> Core
-    end
-
-    subgraph Output [Output Layer]
-        O1[Workflow Output Fixer<br/>Segment Sequence Repair] --> O2[Result Formatting]
-        O2 --> O3[JSON / SDK / MCP / A2A]
-    end
-
-    subgraph Downstream [Downstream Rendering]
-        D1[Multi-model Adapter] --> D2[Sora/Veo/Runway/Keling/SVD]
-        D2 --> D3[FFmpeg Synthesis]
-        D3 --> D4[Final Video]
-    end
-
-    A3 --> P1
-    P7 --> O1
-    O3 --> D1
-
-```
+![penshot](./assets/imgs/penshot.webp)
 
 This system is a typical Natural Language Processing (NLP) application that achieves end-to-end storyboard transcoding through multi-agent collaboration and memory mechanisms. For detailed architectural design, memory pool implementation, and continuity assurance, please refer to: [Architecture Design & Implementation](https://pengline.cn/2026/02/7e6cd67dd5ee45248f2276ac145555f5/)
 

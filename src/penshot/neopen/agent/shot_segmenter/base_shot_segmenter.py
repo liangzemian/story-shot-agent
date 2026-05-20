@@ -19,7 +19,7 @@ from penshot.logger import info, warning, error
 class BaseShotSegmenter(ABC):
     """分镜拆分器抽象基类"""
 
-    def __init__(self, config: Optional[ShotConfig]):
+    def __init__(self, config: ShotConfig):
         self.config = config
         self._initialize()
 

@@ -5,6 +5,7 @@
 @Github: https://github.com/neopen/story-shot-agent
 @Time: 2026/01
 """
+import json
 import os
 from typing import Any, Dict
 
@@ -175,3 +176,7 @@ if __name__ == "__main__":
     print(f"🧠 Embedding fallback: {settings.embed.fallback.device}")
     # print("\n📋 完整配置摘要:")
     # print(json.dumps(settings.get_config_summary(), indent=2, ensure_ascii=False))
+
+    print("\n🔍 检索器配置:")
+    retriever_config = settings.get_retriever_config()
+    print(json.dumps(retriever_config.model_dump(), indent=2, ensure_ascii=False))

@@ -19,7 +19,7 @@ from penshot.logger import info, warning, error, debug
 class BaseVideoSplitter(ABC):
     """视频分割器抽象基类"""
 
-    def __init__(self, config: Optional[ShotConfig] = None):
+    def __init__(self, config: ShotConfig):
         self.config = config
         self._initialize()
 

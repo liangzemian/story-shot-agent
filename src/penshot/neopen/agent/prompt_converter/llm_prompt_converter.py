@@ -33,8 +33,9 @@ from penshot.utils.str_count_utils import only_count_en
 class LLMPromptConverter(BasePromptConverter, BaseLLMAgent):
     """基于LLM的提示词转换器 - 音频参数由LLM直接从CharacterInfo解析"""
 
-    def __init__(self, llm_client, config: Optional[ShotConfig]):
-        super().__init__(config)
+    def __init__(self, llm_client, config: ShotConfig):
+        BasePromptConverter.__init__(self, config)
+        BaseLLMAgent.__init__(self, llm_client, config)
         self.llm_client = llm_client
         self.parsed_script = None
         self.global_metadata = None
@@ -334,7 +335,7 @@ class LLMPromptConverter(BasePromptConverter, BaseLLMAgent):
         )
 
         # 调用LLM
-        result = self._call_llm_parse_with_retry(self.llm_client, self.system_prompt, user_prompt)
+        result = self._call_llm_parse_with_retry(self.system_prompt, user_prompt)
 
         # 获取生成的视频提示词
         english_prompt = result.get("prompt", "")

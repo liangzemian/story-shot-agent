@@ -428,6 +428,7 @@ class PromptTemplateManager:
             self.script_kb = ScriptKnowledgeBase(
                 embeddings=self.embedding_model,
                 storage_dir=storage_dir,
+                script_id=self._current_script_id,
                 chunk_size=512,
                 chunk_overlap=20
             )

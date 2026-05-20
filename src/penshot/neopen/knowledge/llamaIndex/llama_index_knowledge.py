@@ -34,6 +34,7 @@ class ScriptKnowledgeBase:
 
     def __init__(self,
                  embeddings: Optional[BaseEmbedding],
+                 script_id: str,
                  storage_dir: str = settings.get_data_paths().get("data_embedding"),
                  chunk_size: int = 512,
                  chunk_overlap: int = 20):
@@ -65,7 +66,7 @@ class ScriptKnowledgeBase:
         self._offline_mode = False
 
         # 当前激活的 script_id（用于默认操作）
-        self._current_script_id: Optional[str] = None
+        self._current_script_id: str = script_id
 
         # 初始化存储
         if self.storage_dir:
@@ -429,7 +430,7 @@ class ScriptKnowledgeBase:
 
     def query(self, query_text: str, script_id: str,
               search_type: str = "similarity", similarity_top_k: int = 5,
-              use_rerank: bool = False, rerank_model: str = "BAAI/bge-reranker-large") -> Dict[str, Any]:
+              use_rerank: bool = True, rerank_model: str = "BAAI/bge-reranker-large") -> Dict[str, Any]:
         """
         查询知识库 - 支持按 script_id 隔离
 

@@ -4,7 +4,7 @@
 @Author: HiPeng
 @Time: 2026/4/23 22:45
 """
-
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from llama_index.core import VectorStoreIndex, Document
@@ -18,16 +18,23 @@ from penshot.logger import debug, info, error, warning
 class PromptTemplateKB:
     """提示词模板知识库 - 专门存储成功的提示词模板"""
 
-    def __init__(self, embeddings, storage_dir: Optional[str] = settings.get_data_paths.get('prompt_templates')):
+    def __init__(self, embeddings, script_id: str, storage_dir: Optional[str] = None):
         """
         初始化提示词模板知识库
 
         Args:
             embeddings: 嵌入模型
+            script_id: 剧本ID（用于数据隔离）
             storage_dir: 存储目录（可选）
         """
         self.embeddings = embeddings
-        self.storage_dir = storage_dir
+        self.script_id = script_id
+        if storage_dir is None:
+            base_dir = settings.get_data_paths().get("data_embedding", "data/embedding")
+            self.storage_dir = Path(base_dir) / "prompt_templates" / script_id
+        else:
+            self.storage_dir = Path(storage_dir) / script_id
+
         self.index = None
         self.templates = []  # 模板缓存
 
@@ -37,11 +44,13 @@ class PromptTemplateKB:
             chunk_overlap=20
         )
 
-        # 尝试加载已有索引
-        if storage_dir:
-            self._load_index()
+        # 确保目录存在
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-        info("提示词模板知识库初始化完成")
+        # 尝试加载已有索引
+        self._load_index()
+
+        info(f"提示词模板知识库初始化完成: script_id={script_id}, storage={self.storage_dir}")
 
     def _load_index(self):
         """加载已有索引"""

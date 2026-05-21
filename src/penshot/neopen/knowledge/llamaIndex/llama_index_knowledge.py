@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from llama_index.core import VectorStoreIndex, StorageContext
@@ -18,6 +19,8 @@ from llama_index.core.node_parser import SentenceSplitter, SentenceWindowNodePar
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import Document
 from llama_index.core.vector_stores import SimpleVectorStore
+from llama_index.core.vector_stores.types import BasePydanticVectorStore
+from pydantic import SerializeAsAny
 
 from penshot.config.config import settings
 from penshot.logger import debug, info, error, warning
@@ -35,7 +38,7 @@ class ScriptKnowledgeBase:
     def __init__(self,
                  embeddings: Optional[BaseEmbedding],
                  script_id: str,
-                 storage_dir: str = settings.get_data_paths().get("data_embedding"),
+                 storage_dir: str = None,
                  chunk_size: int = 512,
                  chunk_overlap: int = 20):
         """
@@ -43,18 +46,24 @@ class ScriptKnowledgeBase:
 
         Args:
             embeddings: 嵌入模型
+            script_id: 剧本ID（必需，用于数据隔离）
             storage_dir: 存储目录
             chunk_size: 文本块大小
             chunk_overlap: 文本块重叠大小
         """
         self.embeddings = embeddings
-        self.storage_dir = storage_dir
+        if storage_dir is None:
+            base_dir = settings.get_data_paths().get("data_embedding", "data/embedding")
+            self.storage_dir = Path(base_dir) / "script_kb"
+        else:
+            self.storage_dir = Path(storage_dir)
+
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
         # 按 script_id 隔离的索引和向量存储
         self._indices: Dict[str, Optional[VectorStoreIndex]] = {}  # script_id -> index
-        self._vector_stores: Dict[str, SimpleVectorStore] = {}  # script_id -> vector_store
+        self._vector_stores: Dict[str, SerializeAsAny[BasePydanticVectorStore]] = {}  # script_id -> vector_store
         self._storage_contexts: Dict[str, StorageContext] = {}  # script_id -> storage_context
         self._retrievers: Dict[str, BaseRetriever] = {}  # script_id -> retriever
 
@@ -82,7 +91,7 @@ class ScriptKnowledgeBase:
     def _get_vector_store_path(self, script_id: str) -> str:
         """获取指定剧本的向量存储文件路径"""
         subdir = self._get_script_subdir(script_id)
-        return os.path.join(subdir, "vector_store.json") if subdir else None
+        return os.path.join(subdir, "default__vector_store.json") if subdir else None
 
     def _get_parsed_dir(self, script_id: str) -> str:
         """获取指定剧本的解析结果目录"""
@@ -117,9 +126,18 @@ class ScriptKnowledgeBase:
         debug(f"已加载 {len(self.parsed_results)} 个剧本的解析结果")
 
     def _load_vector_store_for_script(self, script_id: str) -> Optional[SimpleVectorStore]:
-        """为指定剧本加载向量存储"""
-        vector_store_path = self._get_vector_store_path(script_id)
-        if not vector_store_path or not os.path.exists(vector_store_path):
+        """为指定剧本加载向量存储 - 使用正确的文件名"""
+        script_dir = self._get_script_subdir(script_id)
+        if not script_dir or not os.path.exists(script_dir):
+            return None
+
+        # 尝试默认文件名
+        vector_store_path = os.path.join(script_dir, "default__vector_store.json")
+        if not os.path.exists(vector_store_path):
+            # 兼容旧文件名
+            vector_store_path = os.path.join(script_dir, "vector_store.json")
+
+        if not os.path.exists(vector_store_path):
             return None
 
         try:
@@ -132,40 +150,85 @@ class ScriptKnowledgeBase:
             warning(f"加载向量存储失败: {script_id}, {e}")
             return None
 
+    def _recreate_vector_store(self, script_id: str) -> Optional[SerializeAsAny[BasePydanticVectorStore]]:
+        """重建损坏的向量存储 - 备份后创建新的"""
+        vector_store_path = self._get_vector_store_path(script_id)
+        try:
+            if vector_store_path and os.path.exists(vector_store_path):
+                # 备份损坏文件
+                backup_path = f"{vector_store_path}_corrupted_{int(datetime.now().timestamp())}"
+                shutil.copy(vector_store_path, backup_path)
+                warning(f"已备份损坏的向量存储: {backup_path}")
+                os.remove(vector_store_path)
+
+            # 同时删除可能存在的损坏的 docstore 和 index_store
+            script_dir = self._get_script_subdir(script_id)
+            if script_dir:
+                for filename in ["docstore.json", "index_store.json"]:
+                    file_path = os.path.join(script_dir, filename)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        debug(f"已删除: {file_path}")
+
+            # 创建新的向量存储
+            self._vector_stores[script_id] = SimpleVectorStore()
+            self._storage_contexts[script_id] = StorageContext.from_defaults(
+                vector_store=self._vector_stores[script_id]
+            )
+            self._indices[script_id] = None
+            debug(f"已为剧本 {script_id} 创建新的向量存储")
+            return self._vector_stores[script_id]
+
+        except Exception as e:
+            error(f"重建向量存储失败: {script_id}, {e}")
+            return None
+
     def _ensure_script_index(self, script_id: str):
-        """确保指定剧本的索引已加载"""
-        if script_id in self._indices:
+        """确保指定剧本的索引已加载 - 修复版"""
+        if script_id in self._indices and self._indices[script_id] is not None:
             return
 
-        # 尝试加载现有向量存储
-        vector_store = self._load_vector_store_for_script(script_id)
+        script_dir = self._get_script_subdir(script_id)
 
-        if vector_store:
-            # 使用现有存储
-            self._vector_stores[script_id] = vector_store
-            storage_context = StorageContext.from_defaults(vector_store=vector_store)
-            self._storage_contexts[script_id] = storage_context
+        # 检查是否有完整的存储文件
+        if script_dir and os.path.exists(script_dir):
+            docstore_path = os.path.join(script_dir, "docstore.json")
 
-            if self.embeddings:
+            if os.path.exists(docstore_path):
                 try:
-                    self._indices[script_id] = VectorStoreIndex.from_vector_store(
-                        vector_store,
-                        storage_context=storage_context,
-                        embed_model=self.embeddings
-                    )
-                    debug(f"已加载剧本索引: {script_id}")
+                    # 从目录加载完整的存储上下文
+                    storage_context = StorageContext.from_defaults(persist_dir=script_dir)
+
+                    if self.embeddings and storage_context.vector_store:
+                        # 关键修复：使用 VectorStoreIndex 构造函数，而不是 from_vector_store
+                        # 因为 storage_context 已经包含了所有信息
+                        from llama_index.core.indices.vector_store import VectorStoreIndex
+
+                        self._indices[script_id] = VectorStoreIndex(
+                            nodes=[],  # 空节点列表，从 storage_context 恢复
+                            storage_context=storage_context,
+                            embed_model=self.embeddings,
+                            show_progress=False
+                        )
+                        self._vector_stores[script_id] = storage_context.vector_store
+                        self._storage_contexts[script_id] = storage_context
+
+                        # 验证加载成功
+                        if hasattr(storage_context.vector_store, '_data'):
+                            vector_count = len(storage_context.vector_store._data.embedding_dict)
+                            info(f"已加载剧本索引: {script_id}, 向量数={vector_count}, 文档数={len(storage_context.docstore.docs)}")
+                        return
                 except Exception as e:
-                    warning(f"加载索引失败: {script_id}, {e}")
-                    self._indices[script_id] = None
-            else:
-                self._indices[script_id] = None
-        else:
-            # 创建新存储
-            self._vector_stores[script_id] = SimpleVectorStore()
-            storage_context = StorageContext.from_defaults(vector_store=self._vector_stores[script_id])
-            self._storage_contexts[script_id] = storage_context
-            self._indices[script_id] = None
-            debug(f"创建新剧本存储: {script_id}")
+                    error(f"从目录加载失败: {script_id}, {e}")
+                    import traceback
+                    traceback.print_exc()
+
+        # 创建新存储
+        self._vector_stores[script_id] = SimpleVectorStore()
+        storage_context = StorageContext.from_defaults(vector_store=self._vector_stores[script_id])
+        self._storage_contexts[script_id] = storage_context
+        self._indices[script_id] = None
+        debug(f"创建新剧本存储: {script_id}")
 
     def set_current_script(self, script_id: str):
         """设置当前操作的剧本ID"""
@@ -191,25 +254,6 @@ class ScriptKnowledgeBase:
         if not target_id:
             return None
         return self._vector_stores.get(target_id)
-
-    def _recreate_vector_store(self, script_id: str):
-        """重建指定剧本的损坏向量存储"""
-        vector_store_path = self._get_vector_store_path(script_id)
-        try:
-            if vector_store_path and os.path.exists(vector_store_path):
-                backup_path = f"{vector_store_path}_backup_{int(datetime.now().timestamp())}"
-                shutil.copy(vector_store_path, backup_path)
-                warning(f"已备份损坏的向量存储到: {backup_path}")
-                os.remove(vector_store_path)
-
-            # 创建新的向量存储
-            self._vector_stores[script_id] = SimpleVectorStore()
-            self._storage_contexts[script_id] = StorageContext.from_defaults(vector_store=self._vector_stores[script_id])
-            self._indices[script_id] = None
-            debug(f"已为剧本 {script_id} 创建新的向量存储")
-
-        except Exception as e:
-            error(f"重建向量存储失败: {script_id}, {e}")
 
     def add_parsed_script(self, parsed_script: ParsedScript, script_id: str = None) -> Dict[str, Any]:
         """
@@ -432,115 +476,119 @@ class ScriptKnowledgeBase:
               search_type: str = None, similarity_top_k: int = None,
               use_rerank: bool = False, rerank_model: str = None) -> Dict[str, Any]:
         """
-        查询知识库 - 支持按 script_id 隔离
-
-        Args:
-            query_text: 查询文本
-            script_id: 指定剧本ID（用于隔离查询）
-            search_type: 搜索类型
-            similarity_top_k: 相似性检索的文档数量
-            use_rerank: 是否使用重排序
-            rerank_model: 重排序模型名称
-
-        Returns:
-            查询结果
+        查询知识库 - 使用手动余弦相似度计算
         """
         target_id = script_id or self._current_script_id
 
         if not target_id:
             debug("未指定剧本ID，跳过查询")
-            return {
-                "query": query_text,
-                "results": [],
-                "total_results": 0,
-                "error": "未指定剧本ID"
-            }
+            return {"query": query_text, "results": [], "total_results": 0, "error": "未指定剧本ID"}
 
-        index = self._get_index(target_id)
+        # 确保索引已加载
+        self._ensure_script_index(target_id)
+        index = self._indices.get(target_id)
         if not index:
             debug(f"剧本 {target_id} 索引未创建，跳过查询")
-            return {
-                "query": query_text,
-                "results": [],
-                "total_results": 0,
-                "error": f"剧本 {target_id} 索引未创建"
-            }
+            return {"query": query_text, "results": [], "total_results": 0, "error": f"剧本 {target_id} 索引未创建"}
 
         try:
             debug(f"执行查询: script_id={target_id}, query={query_text[:50]}...")
 
-            # 创建检索器（如需要）
-            if target_id not in self._retrievers:
-                self.create_retriever_for_script(target_id, search_type, similarity_top_k, use_rerank, rerank_model)
+            if similarity_top_k is None:
+                similarity_top_k = 5
 
-            retriever = self._retrievers.get(target_id)
-            if not retriever or not hasattr(retriever, 'retrieve'):
-                return {
-                    "query": query_text,
-                    "results": [],
-                    "total_results": 0,
-                    "error": "检索器未就绪"
-                }
+            # 获取向量存储
+            vector_store = self._vector_stores.get(target_id)
+            if not vector_store or not hasattr(vector_store, '_data'):
+                error("向量存储未就绪")
+                return {"query": query_text, "results": [], "total_results": 0, "error": "向量存储未就绪"}
 
-            # 执行检索
-            nodes = retriever.retrieve(query_text)
+            # 获取查询向量
+            query_embedding = self.embeddings.embed_query(query_text)
 
-            # 格式化结果（只返回当前剧本的结果）
+            # 手动计算余弦相似度
+            import numpy as np
             results = []
-            for i, node in enumerate(nodes):
-                # 额外过滤确保只返回当前剧本的结果
-                meta = dict(node.node.metadata) if hasattr(node.node, 'metadata') else {}
-                if meta.get("script_id") != target_id:
-                    continue
 
-                result = {
-                    "id": str(node.node.node_id),
-                    "score": node.score,
-                    "text": node.node.text,
-                    "metadata": meta,
+            for doc_id, embedding in vector_store._data.embedding_dict.items():
+                # 计算余弦相似度
+                dot = np.dot(query_embedding, embedding)
+                norm_q = np.linalg.norm(query_embedding)
+                norm_d = np.linalg.norm(embedding)
+                similarity = dot / (norm_q * norm_d) if norm_q > 0 and norm_d > 0 else 0
+
+                # 获取文档文本和元数据
+                storage_context = self._storage_contexts.get(target_id)
+                doc = None
+                if storage_context and hasattr(storage_context, 'docstore'):
+                    doc = storage_context.docstore.get_document(doc_id)
+
+                text = ""
+                metadata = {}
+                if doc:
+                    text = doc.text if hasattr(doc, 'text') else str(doc)
+                    metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+
+                results.append({
+                    "doc_id": doc_id,
+                    "similarity": similarity,
+                    "text": text,
+                    "metadata": metadata
+                })
+
+            # 按相似度排序
+            results.sort(key=lambda x: x['similarity'], reverse=True)
+            results = results[:similarity_top_k]
+
+            # 格式化输出
+            formatted_results = []
+            for i, r in enumerate(results):
+                formatted_results.append({
+                    "id": r["doc_id"],
+                    "score": r["similarity"],
+                    "text": r["text"],
+                    "metadata": r["metadata"],
                     "rank": i + 1
-                }
-                results.append(result)
+                })
 
-            info(f"查询完成: script_id={target_id}, 返回{len(results)}个结果")
+            info(f"查询完成: script_id={target_id}, 返回{len(formatted_results)}个结果")
 
             return {
                 "query": query_text,
-                "results": results,
-                "total_results": len(results),
+                "results": formatted_results,
+                "total_results": len(formatted_results),
                 "script_id": target_id,
-                "search_type": search_type,
                 "similarity_top_k": similarity_top_k,
-                "use_rerank": use_rerank
             }
 
         except Exception as e:
             error(f"查询失败: {str(e)}")
-            return {
-                "query": query_text,
-                "results": [],
-                "total_results": 0,
-                "error": str(e)
-            }
+            import traceback
+            traceback.print_exc()
+            return {"query": query_text, "results": [], "total_results": 0, "error": str(e)}
 
     def create_retriever_for_script(self, script_id: str, search_type: str = None,
-                                     similarity_top_k: int = None, use_rerank: bool = False,
-                                     rerank_model: str = None):
+                                    similarity_top_k: int = None, use_rerank: bool = False,
+                                    rerank_model: str = None):
         """为指定剧本创建检索器"""
         index = self._get_index(script_id)
         if not index:
             return
 
         try:
+            if similarity_top_k is None:
+                similarity_top_k = 5
+            if search_type is None:
+                search_type = "similarity"
+
             if search_type == "mmr":
                 retriever = index.as_retriever(
-                    retriever_mode="mmr",
                     similarity_top_k=similarity_top_k,
-                    mmr_threshold=0.8
+                    vector_store_query_mode="mmr",
+                    mmr_threshold=0.6
                 )
             else:
                 retriever = index.as_retriever(
-                    retriever_mode="similarity",
                     similarity_top_k=similarity_top_k
                 )
 
@@ -548,10 +596,22 @@ class ScriptKnowledgeBase:
             retriever_config = settings.get_retriever_config()
             if use_rerank or retriever_config.rerank_enabled:
                 try:
-                    if retriever_config.rerank_model_local_path and os.path.exists(retriever_config.rerank_model_local_path):
-                        model_to_use = retriever_config.rerank_model_local_path
+                    # 修复：将相对路径转换为绝对路径
+                    if retriever_config.rerank_model_local_path:
+                        model_path = retriever_config.rerank_model_local_path
+                        # 转换为绝对路径
+                        if not os.path.isabs(model_path):
+                            # 相对于项目根目录
+                            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))))
+                            model_path = os.path.join(project_root, model_path)
+
+                        if os.path.exists(model_path):
+                            model_to_use = model_path
+                        else:
+                            warning(f"本地模型路径不存在: {model_path}")
+                            model_to_use = retriever_config.rerank_model_name or rerank_model or "BAAI/bge-reranker-large"
                     else:
-                        model_to_use = retriever_config.rerank_model_name or rerank_model
+                        model_to_use = retriever_config.rerank_model_name or rerank_model or "BAAI/bge-reranker-large"
 
                     from llama_index.core.postprocessor import SentenceTransformerRerank
                     rerank = SentenceTransformerRerank(
@@ -559,10 +619,10 @@ class ScriptKnowledgeBase:
                         top_n=min(3, similarity_top_k)
                     )
                     retriever = index.as_retriever(
-                        retriever_mode=search_type or retriever_config.search_type,
-                        similarity_top_k=similarity_top_k or retriever_config.similarity_top_k,
+                        similarity_top_k=similarity_top_k,
                         node_postprocessors=[rerank]
                     )
+                    info(f"重排序已启用，模型: {model_to_use}")
                 except Exception as e:
                     warning(f"重排序初始化失败: {e}")
 
@@ -674,7 +734,6 @@ class ScriptKnowledgeBase:
             self.remove_script(script_id)
         info("已清空所有剧本")
 
-
     def create_retriever(self,
                          script_id: Optional[str] = None,
                          search_type: str = None,
@@ -714,7 +773,6 @@ class ScriptKnowledgeBase:
 
         return self._retrievers.get(target_id)
 
-
     def get_retriever(self, script_id: str) -> Optional[BaseRetriever]:
         """
         获取指定剧本的检索器
@@ -752,7 +810,6 @@ class ScriptKnowledgeBase:
 
         return self.get_retriever(target_id)
 
-
     def query_structured(self, query_type: str, query_value: str,
                          script_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
@@ -779,12 +836,10 @@ class ScriptKnowledgeBase:
             return None
 
     def _add_documents_to_index(self, documents: List[Document], script_id: str):
-        """添加文档到指定剧本的索引"""
+        """添加文档到指定剧本的索引 - 确保完整保存"""
         try:
             self._ensure_script_index(script_id)
             index = self._indices.get(script_id)
-            vector_store = self._vector_stores.get(script_id)
-            storage_context = self._storage_contexts.get(script_id)
 
             # 创建节点解析器
             if self.chunk_size > 1000:
@@ -804,27 +859,33 @@ class ScriptKnowledgeBase:
                 try:
                     self._indices[script_id] = VectorStoreIndex.from_documents(
                         documents,
-                        storage_context=storage_context,
+                        storage_context=self._storage_contexts[script_id],
                         transformations=[node_parser],
                         embed_model=self.embeddings,
                         show_progress=True
                     )
+                    debug(f"创建新索引: {script_id}")
                 except Exception as e:
                     warning(f"创建索引失败: {script_id}, {e}")
                     self._indices[script_id] = None
+                    raise
             else:
                 try:
                     nodes = node_parser.get_nodes_from_documents(documents)
                     index.insert_nodes(nodes)
+                    debug(f"向索引添加 {len(nodes)} 个节点: {script_id}")
                 except Exception as e:
                     warning(f"向索引添加文档失败: {script_id}, {e}")
+                    raise
 
-            debug(f"已添加{len(documents)}个文档到剧本 {script_id}")
+            # 关键：立即保存完整的存储上下文
+            self._save_storage(script_id)
 
         except Exception as e:
             error(f"添加文档到索引失败: {script_id}, {e}")
+            raise
 
-    def _save_storage(self, script_id: str):
+    def _save_vector_storage(self, script_id: str):
         """保存指定剧本的向量存储"""
         try:
             vector_store = self._vector_stores.get(script_id)
@@ -834,6 +895,28 @@ class ScriptKnowledgeBase:
                     os.makedirs(os.path.dirname(vector_store_path), exist_ok=True)
                     vector_store.persist(persist_path=vector_store_path)
                     debug(f"已保存向量存储: {script_id}")
+        except Exception as e:
+            warning(f"保存存储失败: {script_id}, {e}")
+
+    def _save_storage(self, script_id: str):
+        """保存指定剧本的完整存储上下文 - 确保所有文件都被保存"""
+        try:
+            storage_context = self._storage_contexts.get(script_id)
+            if storage_context:
+                script_dir = self._get_script_subdir(script_id)
+                if script_dir:
+                    # 关键：保存完整的存储上下文
+                    # 这会同时保存 vector_store.json, docstore.json, index_store.json
+                    storage_context.persist(persist_dir=script_dir)
+                    debug(f"已保存完整存储上下文到: {script_dir}")
+
+                    # 验证保存是否成功
+                    vector_store_path = os.path.join(script_dir, "default__vector_store.json")
+                    docstore_path = os.path.join(script_dir, "docstore.json")
+                    if os.path.exists(vector_store_path) and os.path.exists(docstore_path):
+                        debug(f"验证通过: vector_store 和 docstore 都已保存")
+                    else:
+                        warning(f"保存不完整: vector_store={os.path.exists(vector_store_path)}, docstore={os.path.exists(docstore_path)}")
         except Exception as e:
             warning(f"保存存储失败: {script_id}, {e}")
 
@@ -858,15 +941,20 @@ class ScriptKnowledgeBase:
         return self._parser_tool
 
 
-def create_script_knowledge_base(embeddings, storage_dir=None) -> ScriptKnowledgeBase:
+def create_script_knowledge_base(embeddings, script_id: str, storage_dir=None) -> ScriptKnowledgeBase:
     """
     创建剧本知识库实例
 
     Args:
         embeddings: 嵌入模型
-        storage_dir: 存储目录
+        script_id: 剧本ID（必需）
+        storage_dir: 存储目录（应该指向 data/embedding，不要包含 script_kb）
 
     Returns:
         剧本知识库实例
     """
-    return ScriptKnowledgeBase(embeddings=embeddings, storage_dir=storage_dir)
+    return ScriptKnowledgeBase(
+        embeddings=embeddings,
+        script_id=script_id,
+        storage_dir=storage_dir
+    )

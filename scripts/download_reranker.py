@@ -65,7 +65,7 @@ def download_model_by_snapshot():
     except Exception as e:
         print(f"\n❌ 下载过程中发生错误: {e}")
         print("\n可能的解决思路:")
-        print("1. 网络问题: 请尝试取消代码开头的【方案A】注释，使用国内镜像")
+        print("1. 网络问题: 请尝试使用国内镜像")
         print("2. 空间不足: 请确保目标磁盘有至少 4GB 的可用空间")
         print("3. 权限问题: 请确保你对当前目录有写入权限")
         sys.exit(1)

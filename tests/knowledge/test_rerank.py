@@ -6,16 +6,20 @@
 """
 
 import asyncio
+from pathlib import Path
+
 from penshot.neopen.knowledge.llamaIndex.llama_index_knowledge import ScriptKnowledgeBase
 from penshot.neopen.shot_config import ShotConfig
 
 
 async def test_rerank():
-    # 1. 初始化知识库
     config = ShotConfig()
     embeddings = config.get_embed_by_config()
-    # 2. 设置当前剧本（替换为你的实际 script_id）
-    script_id = "SN1780745829485283341820"  # 从日志中获取
+    script_id = "SN1780745829485283341820"
+
+    print("=" * 60)
+    print("初始化知识库...")
+    print("=" * 60)
 
     kb = ScriptKnowledgeBase(
         embeddings=embeddings,
@@ -23,64 +27,52 @@ async def test_rerank():
     )
     kb.set_current_script(script_id)
 
-    # 3. 测试查询
+    # 检查索引是否加载成功
+    print(f"\n索引状态: script_id={script_id}")
+    print(f"  _indices contains: {script_id in kb._indices}")
+    if script_id in kb._indices:
+        print(f"  index is None: {kb._indices[script_id] is None}")
+
+    # 如果索引为 None，尝试重建
+    if script_id in kb._indices and kb._indices[script_id] is None:
+        print("\n⚠️ 索引为 None，尝试从已有文档重建...")
+        if script_id in kb.document_cache and kb.document_cache[script_id]:
+            print(f"  找到 {len(kb.document_cache[script_id])} 个缓存文档，重建索引...")
+            kb._add_documents_to_index(kb.document_cache[script_id], script_id)
+        else:
+            print("  没有缓存文档，需要重新添加剧本")
+
     query = "灰色羊毛毯 林然"
 
-    print("=" * 60)
-    print("测试重排序效果")
+    print("\n" + "=" * 60)
+    print("测试查询")
     print("=" * 60)
 
-    # 4. 不使用重排序
-    print("\n1. 不使用重排序 (use_rerank=False):")
-    result_no_rerank = kb.query(
+    # 执行查询
+    result = kb.query(
         query_text=query,
         script_id=script_id,
-        similarity_top_k=10,
-        use_rerank=False
-    )
-
-    for i, r in enumerate(result_no_rerank.get("results", [])[:5]):
-        print(f"   {i + 1}. score={r['score']:.4f}: {r['text'][:80]}...")
-
-    # 5. 使用重排序
-    print("\n2. 使用重排序 (use_rerank=True):")
-    result_with_rerank = kb.query(
-        query_text=query,
-        script_id=script_id,
-        similarity_top_k=10,
+        similarity_top_k=5,
         use_rerank=True
     )
 
-    for i, r in enumerate(result_with_rerank.get("results", [])[:5]):
-        print(f"   {i + 1}. score={r['score']:.4f}: {r['text'][:80]}...")
+    print(f"\n查询结果: {len(result.get('results', []))} 条")
+    for i, r in enumerate(result.get("results", [])):
+        print(f"  {i + 1}. score={r['score']:.4f}: {r['text'][:100]}...")
+        print(f"      类型: {r['metadata'].get('type', 'unknown')}")
 
-    # 6. 对比结果
-    print("\n3. 对比分析:")
-    print(f"   无重排序返回: {len(result_no_rerank.get('results', []))} 条")
-    print(f"   有重排序返回: {len(result_with_rerank.get('results', []))} 条")
+    # 检查文件结构
+    print("\n" + "=" * 60)
+    print("文件结构检查")
+    print("=" * 60)
 
-    # 检查是否使用了重排序模型
-    if result_with_rerank.get("use_rerank"):
-        print("    重排序已启用")
+    storage_dir = Path("../../data/embedding/script_kb") / script_id
+    if storage_dir.exists():
+        for f in storage_dir.iterdir():
+            size = f.stat().st_size if f.is_file() else 0
+            print(f"  {f.name} ({size} bytes)")
     else:
-        print("    重排序未启用")
-
-    # 7. 查看检索器配置
-    print("\n4. 检索器信息:")
-    if script_id in kb._retrievers:
-        retriever = kb._retrievers[script_id]
-        print(f"   检索器类型: {type(retriever)}")
-        if hasattr(retriever, '_node_postprocessors'):
-            print(f"   后处理器: {retriever._node_postprocessors}")
-
-    # 8. 检查重排序模型是否加载
-    print("\n5. 重排序模型检查:")
-    try:
-        from sentence_transformers import CrossEncoder
-        model = CrossEncoder("BAAI/bge-reranker-large")
-        print("    bge-reranker-large 模型可用")
-    except Exception as e:
-        print(f"   重排序模型不可用: {e}")
+        print(f"  目录不存在: {storage_dir}")
 
 
 if __name__ == "__main__":

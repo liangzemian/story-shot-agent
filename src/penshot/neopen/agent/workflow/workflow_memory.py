@@ -280,7 +280,7 @@ class WorkflowMemory:
                 if hasattr(result, 'fragments'):
                     prompts = result.fragments
                     stats["prompt_count"] = len(prompts)
-                    stats["audio_prompt_count"] = sum(1 for p in prompts if hasattr(p, 'audio_prompt') and p.audio_prompt)
+                    stats["audio_prompt_count"] = sum(1 for p in prompts if hasattr(p, 'audio') and p.audio)
 
                     if prompts:
                         prompt_lengths = [len(p.prompt) if hasattr(p, 'prompt') else 0 for p in prompts]

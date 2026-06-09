@@ -483,12 +483,12 @@ class MultiAgentPipeline:
                 if isinstance(f, dict):
                     if f.get("prompt"):
                         fragments_with_prompts.append(f)
-                    if f.get("audio_prompt"):
+                    if f.get("audio"):
                         fragments_with_audio_prompts.append(f)
                 else:
                     if getattr(f, 'prompt', None):
                         fragments_with_prompts.append(f)
-                    if getattr(f, 'audio_prompt', None):
+                    if getattr(f, 'audio', None):
                         fragments_with_audio_prompts.append(f)
 
             if len(fragments_with_prompts) < len(fragments) * 0.8:

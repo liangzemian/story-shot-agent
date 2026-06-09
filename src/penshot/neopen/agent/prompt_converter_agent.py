@@ -240,7 +240,7 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                   f"最小={min(prompt_lengths)}, 最大={max(prompt_lengths)}")
 
             # 记录音频提示词统计
-            audio_count = sum(1 for f in instructions.fragments if f.audio_prompt)
+            audio_count = sum(1 for f in instructions.fragments if f.audio)
             debug(f"音频提示词生成: {audio_count}/{len(instructions.fragments)}个片段")
 
             # 记录修复历史
@@ -382,8 +382,8 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
 
         # 6. 检查音频提示词
         for prompt in prompts:
-            if prompt.audio_prompt:
-                audio = prompt.audio_prompt
+            if prompt.audio:
+                audio = prompt.audio
                 # 检查音频提示词长度
                 if len(audio.prompt) < 10:
                     issues.append(BasicViolation(
@@ -474,7 +474,7 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
         original_stats = {
             "prompt_count": len(instructions.fragments),
             "avg_prompt_length": sum(len(p.prompt) for p in instructions.fragments) / len(instructions.fragments) if instructions.fragments else 0,
-            "audio_count": sum(1 for p in instructions.fragments if p.audio_prompt)
+            "audio_count": sum(1 for p in instructions.fragments if p.audio)
         }
 
         repair_actions = []
@@ -610,7 +610,7 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                     # 创建默认音频提示词
                     from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIAudioPrompt, AudioModelType, AudioVoiceType
 
-                    prompt.audio_prompt = AIAudioPrompt(
+                    prompt.audio = AIAudioPrompt(
                         audio_id=f"audio{fragment_id[4:]}",
                         prompt=f"音频片段，时长{prompt.duration}秒",
                         model_type=AudioModelType.XTTSv2,
@@ -621,15 +621,15 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
 
                 elif 'duration_mismatch' in issue.rule_code:
                     # 修复音频时长
-                    if prompt.audio_prompt:
-                        prompt.audio_prompt.duration_seconds = prompt.duration
+                    if prompt.audio:
+                        prompt.audio.duration_seconds = prompt.duration
                         repair_actions.append(f"修复音频时长: {fragment_id} -> {prompt.duration}s")
 
         # ========== 7. 更新统计信息 ==========
         new_stats = {
             "prompt_count": len(instructions.fragments),
             "avg_prompt_length": sum(len(p.prompt) for p in instructions.fragments) / len(instructions.fragments) if instructions.fragments else 0,
-            "audio_count": sum(1 for p in instructions.fragments if p.audio_prompt)
+            "audio_count": sum(1 for p in instructions.fragments if p.audio)
         }
 
         # 记录修复历史

@@ -558,7 +558,7 @@ class WorkflowNodes:
             self._update_task_progress(state.input.task_id, TaskStage.CONVERT_COMPLETE, 100)
             self._complete_stage(state.input.task_id, TaskStage.CONVERT_COMPLETE, {
                 "prompt_count": len(instructions.fragments),
-                "audio_prompt_count": sum(1 for f in instructions.fragments if f.audio_prompt)
+                "audio_prompt_count": sum(1 for f in instructions.fragments if f.audio)
             })
 
             if not instructions:
@@ -583,7 +583,7 @@ class WorkflowNodes:
                   f"最小={min(prompt_lengths)}, 最大={max(prompt_lengths)}")
 
             # 统计音频提示词
-            audio_count = sum(1 for f in instructions.fragments if f.audio_prompt)
+            audio_count = sum(1 for f in instructions.fragments if f.audio)
             debug(f"音频提示词: {audio_count}/{len(instructions.fragments)}个片段")
 
             # 统计风格分布

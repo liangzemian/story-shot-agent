@@ -90,6 +90,7 @@ class RuleType(str, Enum):
 
     # 对话相关
     DIALOGUE_MISSING = Rule("dialogue_missing", "对话缺失", IssueType.DIALOGUE)
+    DIALOGUE_INSUFFICIENT = Rule("dialogue_insufficient", "对话提取不足", IssueType.DIALOGUE)
     DIALOGUE_CHARACTER_MISSING = Rule("dialogue_character_missing", "对话缺少角色", IssueType.DIALOGUE)
     DIALOGUE_EMOTION_MISSING = Rule("dialogue_emotion_missing", "对话情感标注缺失", IssueType.DIALOGUE)
 
@@ -245,6 +246,202 @@ class RuleType(str, Enum):
 
     def __str__(self) -> str:
         return f"{self.code}: {self.description} ({self.issue_type.value})"
+
+
+class IssueCode(str, Enum):
+    """统一的问题编码枚举"""
+
+    # ==================== SCENE 场景问题 ====================
+    SCENE_MISSING = "scene_missing"  # 场景缺失
+    SCENE_INSUFFICIENT = "scene_insufficient"  # 场景数量不足
+    SCENE_DESC_MISSING = "scene_desc_missing"  # 场景描述缺失
+    SCENE_LOCATION_INVALID = "scene_location_invalid"  # 场景位置无效
+
+    # ==================== CHARACTER 角色问题 ====================
+    CHARACTER_MISSING = "character_missing"  # 角色缺失
+    CHARACTER_DESC_MISSING = "character_desc_missing"  # 角色描述缺失
+    CHARACTER_INCONSISTENT = "character_inconsistent"  # 角色不一致
+    CHARACTER_DUPLICATE = "character_duplicate"  # 角色重复
+    CHARACTER_NOT_IN_SHOTS = "character_not_in_shots"  # 角色未在镜头中出现
+
+    # ==================== DIALOGUE 对话问题 ====================
+    DIALOGUE_MISSING = "dialogue_missing"  # 对话缺失
+    DIALOGUE_CHARACTER_MISSING = "dialogue_character_missing"  # 对话缺少角色
+    DIALOGUE_EMOTION_MISSING = "dialogue_emotion_missing"  # 对话情感标注缺失
+
+    # ==================== ACTION 动作问题 ====================
+    ACTION_INSUFFICIENT = "action_insufficient"  # 动作提取不足
+    ACTION_DESC_MISSING = "action_desc_missing"  # 动作描述缺失
+    ACTION_BREAK = "action_break"  # 动作连续性中断
+
+    # ==================== DURATION 时长问题 ====================
+    DURATION_TOO_SHORT = "duration_too_short"  # 时长过短
+    DURATION_TOO_LONG = "duration_too_long"  # 时长过长
+    DURATION_UNBALANCED = "duration_unbalanced"  # 时长分布不均
+    DURATION_MISMATCH = "duration_mismatch"  # 时长不匹配
+
+    # ==================== PROMPT 提示词问题 ====================
+    PROMPT_MISSING = "prompt_missing"  # 提示词缺失
+    PROMPT_EMPTY = "prompt_empty"  # 提示词为空
+    PROMPT_TOO_LONG = "prompt_too_long"  # 提示词过长
+    PROMPT_TOO_SHORT = "prompt_too_short"  # 提示词过短
+    PROMPT_TRUNCATED = "prompt_truncated"  # 提示词被截断
+    PROMPT_LOW_QUALITY = "prompt_low_quality"  # 提示词质量较低
+    PROMPT_NO_VISUAL = "prompt_no_visual"  # 缺少视觉描述
+    PROMPT_NO_ACTION = "prompt_no_action"  # 缺少动作描述
+    PROMPT_NO_EMOTION = "prompt_no_emotion"  # 缺少情感描述
+
+    # ==================== NEGATIVE_PROMPT 负面提示词问题 ====================
+    NEGATIVE_PROMPT_MISSING = "negative_prompt_missing"  # 缺少负面提示词
+    NEGATIVE_PROMPT_INSUFFICIENT = "negative_prompt_insufficient"  # 负面提示词不足
+
+    # ==================== AUDIO 音频问题 ====================
+    AUDIO_MISSING = "audio_missing"  # 音频提示词缺失
+    AUDIO_TOO_SHORT = "audio_too_short"  # 音频提示词过短
+    AUDIO_DURATION_MISMATCH = "audio_duration_mismatch"  # 音频时长不匹配
+    AUDIO_VOICE_INVALID = "audio_voice_invalid"  # 人声类型无效
+
+    # ==================== STYLE 风格问题 ====================
+    STYLE_INCONSISTENT = "style_inconsistent"  # 风格不一致
+    STYLE_INVALID = "style_invalid"  # 无效风格
+
+    # ==================== SHOT 镜头问题 ====================
+    SHOT_MISSING = "shot_missing"  # 镜头缺失
+    SHOT_INSUFFICIENT = "shot_insufficient"  # 镜头数量不足
+    SHOT_EXCESSIVE = "shot_excessive"  # 镜头数量过多
+    SHOT_DESC_MISSING = "shot_desc_missing"  # 镜头描述缺失
+    SHOT_DESC_TOO_SHORT = "shot_desc_too_short"  # 镜头描述过短
+    SHOT_TYPE_UNIFORM = "shot_type_uniform"  # 镜头类型单一
+    SHOT_TYPE_INVALID = "shot_type_invalid"  # 镜头类型无效
+    SHOT_TYPE_MISMATCH = "shot_type_mismatch"  # 镜头类型与内容不匹配
+    SHOT_REPETITIVE = "shot_repetitive"  # 镜头类型重复连续
+    SHOT_TRANSITION_ABRUPT = "shot_transition_abrupt"  # 镜头切换突兀
+    SHOT_MISSING_CHARACTER = "shot_missing_character"  # 缺少主要角色标识
+
+    # ==================== FRAGMENT 片段问题 ====================
+    FRAGMENT_MISSING = "fragment_missing"  # 片段缺失
+    FRAGMENT_INSUFFICIENT = "fragment_insufficient"  # 片段数量不足
+    FRAGMENT_EXCESSIVE = "fragment_excessive"  # 片段数量过多
+    FRAGMENT_DESC_MISSING = "fragment_desc_missing"  # 片段描述缺失
+    FRAGMENT_DESC_TOO_SHORT = "fragment_desc_too_short"  # 片段描述过短
+    FRAGMENT_OVERLAP = "fragment_overlap"  # 片段时间重叠
+    FRAGMENT_GAP = "fragment_gap"  # 片段时间间隔
+    FRAGMENT_NO_ELEMENTS = "fragment_no_elements"  # 未关联剧本元素
+    FRAGMENT_ELEMENT_MISMATCH = "fragment_element_mismatch"  # 元素关联错误
+    FRAGMENT_NO_CONTINUITY = "fragment_no_continuity"  # 缺少连续性注释
+
+    # ==================== CONTINUITY 连续性问题 ====================
+    CONTINUITY_BROKEN = "continuity_broken"  # 连续性被破坏
+    TIME_GAP = "time_gap"  # 时间间隔
+    TIME_OVERLAP = "time_overlap"  # 时间重叠
+    EMOTION_INCONSISTENT = "emotion_inconsistent"  # 情感不一致
+    COLOR_INCONSISTENT = "color_inconsistent"  # 色彩不一致
+    LIGHTING_INCONSISTENT = "lighting_inconsistent"  # 光照不一致
+
+    # ==================== TRUNCATION 截断问题 ====================
+    TEXT_TRUNCATED = "text_truncated"  # 文本被截断
+    PROMPT_INCOMPLETE = "prompt_incomplete"  # 提示词不完整
+
+    # ==================== FORMAT 格式问题 ====================
+    ID_FORMAT_INVALID = "id_format_invalid"  # ID格式无效
+    TIMESTAMP_INVALID = "timestamp_invalid"  # 时间戳无效
+    DATA_TYPE_ERROR = "data_type_error"  # 数据类型错误
+
+    # ==================== COMPLETENESS 完整性问题 ====================
+    CONTENT_INCOMPLETE = "content_incomplete"  # 内容不完整
+    METADATA_MISSING = "metadata_missing"  # 元数据缺失
+
+    # ==================== MODEL 模型问题 ====================
+    MODEL_UNSUPPORTED = "model_unsupported"  # 不支持的模型
+    MODEL_DEPRECATED = "model_deprecated"  # 模型已弃用
+
+    # ==================== WEATHER 气象问题 ====================
+    WEATHER_MISSING = "weather_missing"  # 气象信息缺失
+    WEATHER_INCONSISTENT = "weather_inconsistent"  # 气象不一致
+
+    # ==================== OTHER 其他问题 ====================
+    OTHER = "other"  # 其他问题
+
+    @property
+    def category(self) -> str:
+        """获取问题类别（issue_type 对应的字符串）"""
+        return self.value.split('_')[0] if '_' in self.value else self.value
+
+    @property
+    def action(self) -> str:
+        """获取修复动作"""
+        parts = self.value.split('_')
+        return parts[-1] if len(parts) > 1 else 'unknown'
+
+    @classmethod
+    def from_rule_type(cls, rule: 'RuleType') -> 'IssueCode':
+        """从 RuleType 映射到 IssueCode"""
+        mapping = {
+            # 场景相关
+            RuleType.SCENE_MISSING: cls.SCENE_MISSING,
+            RuleType.SCENE_INSUFFICIENT: cls.SCENE_INSUFFICIENT,
+            RuleType.SCENE_DESC_MISSING: cls.SCENE_DESC_MISSING,
+
+            # 角色相关
+            RuleType.CHARACTER_MISSING: cls.CHARACTER_MISSING,
+            RuleType.CHARACTER_INCONSISTENT: cls.CHARACTER_INCONSISTENT,
+            RuleType.CHARACTER_DESC_MISSING: cls.CHARACTER_DESC_MISSING,
+            RuleType.CHARACTER_DUPLICATE: cls.CHARACTER_DUPLICATE,
+
+            # 对话相关
+            RuleType.DIALOGUE_MISSING: cls.DIALOGUE_MISSING,
+
+            # 动作相关
+            RuleType.ACTION_INSUFFICIENT: cls.ACTION_INSUFFICIENT,
+            RuleType.ACTION_DESC_MISSING: cls.ACTION_DESC_MISSING,
+
+            # 时长相关
+            RuleType.SHOT_DURATION_TOO_SHORT: cls.DURATION_TOO_SHORT,
+            RuleType.SHOT_DURATION_TOO_LONG: cls.DURATION_TOO_LONG,
+            RuleType.FRAGMENT_DURATION_TOO_SHORT: cls.DURATION_TOO_SHORT,
+            RuleType.FRAGMENT_DURATION_TOO_LONG: cls.DURATION_TOO_LONG,
+            RuleType.AUDIO_DURATION_MISMATCH: cls.DURATION_MISMATCH,
+
+            # 提示词相关
+            RuleType.PROMPT_MISSING: cls.PROMPT_MISSING,
+            RuleType.PROMPT_EMPTY: cls.PROMPT_EMPTY,
+            RuleType.PROMPT_TOO_LONG: cls.PROMPT_TOO_LONG,
+            RuleType.PROMPT_TOO_SHORT: cls.PROMPT_TOO_SHORT,
+            RuleType.PROMPT_TRUNCATED: cls.PROMPT_TRUNCATED,
+            RuleType.PROMPT_LOW_QUALITY: cls.PROMPT_LOW_QUALITY,
+
+            # 风格相关
+            RuleType.STYLE_INCONSISTENT: cls.STYLE_INCONSISTENT,
+
+            # 音频相关
+            RuleType.AUDIO_PROMPT_MISSING: cls.AUDIO_MISSING,
+
+            # 连续性相关
+            RuleType.FRAGMENT_TIME_GAP: cls.TIME_GAP,
+            RuleType.FRAGMENT_OVERLAP: cls.TIME_OVERLAP,
+            RuleType.SHOT_TRANSITION_ABRUPT: cls.SHOT_TRANSITION_ABRUPT,
+            RuleType.SHOT_ACTION_BREAK: cls.ACTION_BREAK,
+
+            # 镜头相关
+            RuleType.SHOT_MISSING: cls.SHOT_MISSING,
+            RuleType.SHOT_INSUFFICIENT: cls.SHOT_INSUFFICIENT,
+            RuleType.SHOT_DESCRIPTION_MISSING: cls.SHOT_DESC_MISSING,
+            RuleType.SHOT_TYPE_UNIFORM: cls.SHOT_TYPE_UNIFORM,
+            RuleType.SHOT_REPETITIVE: cls.SHOT_REPETITIVE,
+
+            # 片段相关
+            RuleType.FRAGMENT_MISSING: cls.FRAGMENT_MISSING,
+            RuleType.FRAGMENT_INSUFFICIENT: cls.FRAGMENT_INSUFFICIENT,
+            RuleType.FRAGMENT_DESCRIPTION_MISSING: cls.FRAGMENT_DESC_MISSING,
+            RuleType.FRAGMENT_NO_ELEMENTS: cls.FRAGMENT_NO_ELEMENTS,
+
+            # 格式相关
+            RuleType.ID_FORMAT_INVALID: cls.ID_FORMAT_INVALID,
+
+            # 完整性相关
+            RuleType.COMPLETENESS_GENERAL: cls.CONTENT_INCOMPLETE,
+        }
+        return mapping.get(rule, cls.OTHER)
 
 
 class BasicViolation(BaseModel):

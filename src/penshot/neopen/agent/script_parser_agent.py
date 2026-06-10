@@ -65,7 +65,6 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
 
         return parsed_script
 
-
     def repair_result(self, parsed_script: ParsedScript, issues: List[BasicViolation],
                       original_text: str = None) -> ParsedScript:
         return self.repair_script(parsed_script, issues, original_text)
@@ -116,7 +115,6 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
             self._focus_on_scene_detection = True
         if "character_missing" in self.current_repair_params.issue_types:
             self._focus_on_character_detection = True
-
 
     def parser_process(self, script_text: str) -> Optional[ParsedScript]:
         """
@@ -176,7 +174,6 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
 
         return parsed_script
 
-
     def process_with_contract(self, script_text: str, knowledge_manager=None,
                               script_id=None, contract: GlobalConsistencyContract = None) -> Tuple[Optional[ParsedScript], GlobalConsistencyContract]:
         """带契约的剧本解析"""
@@ -218,7 +215,6 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
 
         return parsed_script, contract
 
-
     def detect_parse_issues(self, parsed_script: ParsedScript, original_text: str) -> List[BasicViolation]:
         """
         检测解析问题 - 供质量审查节点调用
@@ -234,38 +230,26 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
 
         # 1. 检查场景完整性
         if not parsed_script.scenes:
-            issues.append(BasicViolation(
-                rule_code=RuleType.SCENE_MISSING.code,
-                rule_name=RuleType.SCENE_MISSING.description,
-                issue_type=IssueType.SCENE,
-                source_node=PipelineNode.PARSE_SCRIPT,
-                description="未能识别到任何场景",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.SCENE_MISSING,
                 severity=SeverityLevel.ERROR,
-                fragment_id=None,
+                source_node=PipelineNode.PARSE_SCRIPT,
                 suggestion="请检查剧本格式是否规范"
             ))
         elif len(parsed_script.scenes) < 2:
-            issues.append(BasicViolation(
-                rule_code=RuleType.SCENE_INSUFFICIENT.code,
-                rule_name=RuleType.SCENE_INSUFFICIENT.description,
-                issue_type=IssueType.SCENE,
-                source_node=PipelineNode.PARSE_SCRIPT,
-                description=f"只识别到{len(parsed_script.scenes)}个场景",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.SCENE_INSUFFICIENT,
                 severity=SeverityLevel.WARNING,
-                fragment_id=None,
+                source_node=PipelineNode.PARSE_SCRIPT,
                 suggestion="剧本可能过于简单或格式不完整"
             ))
 
         # 2. 检查角色完整性
         if not parsed_script.characters:
-            issues.append(BasicViolation(
-                rule_code=RuleType.CHARACTER_MISSING.code,
-                rule_name=RuleType.CHARACTER_MISSING.description,
-                issue_type=IssueType.CHARACTER,
-                source_node=PipelineNode.PARSE_SCRIPT,
-                description="未能识别到任何角色",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.CHARACTER_MISSING,
                 severity=SeverityLevel.ERROR,
-                fragment_id=None,
+                source_node=PipelineNode.PARSE_SCRIPT,
                 suggestion="剧本中需要包含角色信息"
             ))
 
@@ -275,14 +259,10 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         has_dialogue_in_original = any(ind in original_text for ind in dialogue_indicators)
 
         if has_dialogue_in_original and not dialogues:
-            issues.append(BasicViolation(
-                rule_code=RuleType.DIALOGUE_MISSING.code,
-                rule_name=RuleType.DIALOGUE_MISSING.description,
-                issue_type=IssueType.DIALOGUE,
-                source_node=PipelineNode.PARSE_SCRIPT,
-                description="原始文本包含对话但未被提取",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.DIALOGUE_MISSING,
                 severity=SeverityLevel.MAJOR,
-                fragment_id=None,
+                source_node=PipelineNode.PARSE_SCRIPT,
                 suggestion="检查对话格式是否正确（需要角色名: 对话内容）"
             ))
 
@@ -292,14 +272,10 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         verb_count = sum(1 for verb in action_verbs if verb in original_text)
 
         if verb_count > 3 and len(actions) < verb_count * 0.3:
-            issues.append(BasicViolation(
-                rule_code=RuleType.ACTION_INSUFFICIENT.code,
-                rule_name=RuleType.ACTION_INSUFFICIENT.description,
-                issue_type=IssueType.ACTION,
-                source_node=PipelineNode.PARSE_SCRIPT,
-                description=f"检测到{verb_count}个动作词，但只提取了{len(actions)}个动作",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.ACTION_INSUFFICIENT,
                 severity=SeverityLevel.MODERATE,
-                fragment_id=None,
+                source_node=PipelineNode.PARSE_SCRIPT,
                 suggestion="动作描述需要更明确的表述"
             ))
 
@@ -308,15 +284,11 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         for scene in parsed_script.scenes:
             for elem in scene.elements:
                 if elem.character and elem.character not in char_names:
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.CHARACTER_INCONSISTENT.code,
-                        rule_name=RuleType.CHARACTER_INCONSISTENT.description,
-                        issue_type=IssueType.CHARACTER,
-                        source_node=PipelineNode.PARSE_SCRIPT,
-                        description=f"元素{elem.id}引用未定义角色'{elem.character}'",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.CHARACTER_INCONSISTENT,
                         severity=SeverityLevel.MAJOR,
-                        fragment_id=None,
-                        suggestion="请确保所有引用的角色都在characters列表中"
+                        source_node=PipelineNode.PARSE_SCRIPT,
+                        suggestion=f"请确保所有引用的角色都在characters列表中（当前引用：'{elem.character}'）"
                     ))
 
             # ========== 新增：6. 检查时长合理性 ==========
@@ -325,14 +297,10 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
                 # 检查是否有过短的片段
                 short_elements = [e for s in parsed_script.scenes for e in s.elements if e.duration < 1.0]
                 if short_elements:
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.ELEMENT_DURATION_TOO_SHORT.code,
-                        rule_name=RuleType.ELEMENT_DURATION_TOO_SHORT.description,
-                        issue_type=IssueType.DURATION,
-                        source_node=PipelineNode.PARSE_SCRIPT,
-                        description=f"发现{len(short_elements)}个元素时长过短",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.ELEMENT_DURATION_TOO_SHORT,
                         severity=SeverityLevel.WARNING,
-                        fragment_id=None,
+                        source_node=PipelineNode.PARSE_SCRIPT,
                         suggestion="每个元素时长应至少1秒"
                     ))
 
@@ -340,14 +308,10 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
             for scene in parsed_script.scenes:
                 sequences = [e.sequence for e in scene.elements]
                 if sequences != sorted(sequences):
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.ELEMENT_SEQUENCE_WRONG.code,
-                        rule_name=RuleType.ELEMENT_SEQUENCE_WRONG.description,
-                        issue_type=IssueType.SCENE,
-                        source_node=PipelineNode.PARSE_SCRIPT,
-                        description=f"场景{scene.id}的元素顺序不正确",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.ELEMENT_SEQUENCE_WRONG,
                         severity=SeverityLevel.MODERATE,
-                        fragment_id=None,
+                        source_node=PipelineNode.PARSE_SCRIPT,
                         suggestion="按剧情发展顺序排列元素"
                     ))
 
@@ -357,29 +321,21 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
                     if elem.type == ElementType.DIALOGUE and (not elem.emotion or elem.emotion == "neutral"):
                         # 对话内容可能包含情感，但标注为中性
                         if any(word in elem.content.lower() for word in ["笑", "开心", "哭", "伤心", "怒", "生气"]):
-                            issues.append(BasicViolation(
-                                rule_code=RuleType.EMOTION_MISMATCH.code,
-                                rule_name=RuleType.EMOTION_MISMATCH.description,
-                                issue_type=IssueType.CHARACTER,
-                                source_node=PipelineNode.PARSE_SCRIPT,
-                                description=f"对话{elem.id}可能包含情感但标注为中性",
+                            issues.append(BasicViolation.create_violation(
+                                rule_type=RuleType.EMOTION_MISMATCH,
                                 severity=SeverityLevel.INFO,
-                                fragment_id=None,
+                                source_node=PipelineNode.PARSE_SCRIPT,
                                 suggestion="根据对话内容标注正确的情感"
                             ))
 
             # ========== 新增：9. 检查角色描述完整性 ==========
             for char in parsed_script.characters:
                 if not char.description or len(char.description) < 5:
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.CHARACTER_DESC_MISSING.code,
-                        rule_name=RuleType.CHARACTER_DESC_MISSING.description,
-                        issue_type=IssueType.CHARACTER,
-                        source_node=PipelineNode.PARSE_SCRIPT,
-                        description=f"角色'{char.name}'缺少描述信息",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.CHARACTER_DESC_MISSING,
                         severity=SeverityLevel.WARNING,
-                        fragment_id=None,
-                        suggestion="为角色添加外貌、性格等描述信息"
+                        source_node=PipelineNode.PARSE_SCRIPT,
+                        suggestion=f"为角色'{char.name}'添加外貌、性格等描述信息"
                     ))
 
         return issues
@@ -399,7 +355,7 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         info(f"开始修复剧本，发现{len(issues)}个问题")
 
         for issue in issues:
-            debug(f"  问题: rule_code={issue.rule_code}, description={issue.description[:50]}...")
+            debug(f"  问题: issue_code={issue.issue_code}, issue_desc={issue.issue_desc[:50]}...")
 
         # 记录原始状态用于对比
         original_stats = {
@@ -691,9 +647,8 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         # 1. 场景完整性 (权重0.25)
         if not script.scenes:
             warnings.append("未识别到明确场景")
-            issues.append(self._create_issue(
-                "scene_missing", "场景缺失", SeverityLevel.ERROR, IssueType.SCENE,
-                "未能识别到任何场景，请检查剧本格式"
+            issues.append(BasicViolation.create_violation(
+                RuleType.SCENE_MISSING, severity=SeverityLevel.ERROR,
             ))
             scene_score = 0.0
         else:
@@ -707,9 +662,8 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         # 2. 角色完整性 (权重0.25)
         if not script.characters:
             warnings.append("未识别到明确角色")
-            issues.append(self._create_issue(
-                "character_missing", "角色缺失", SeverityLevel.ERROR, IssueType.CHARACTER,
-                "未能识别到任何角色，剧本中需要包含角色信息"
+            issues.append(BasicViolation.create_violation(
+                RuleType.CHARACTER_MISSING, severity=SeverityLevel.ERROR
             ))
             char_score = 0.0
         else:
@@ -725,9 +679,8 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
 
         if has_dialogue_in_original and not dialogues:
             warnings.append("对话提取可能不完整")
-            issues.append(self._create_issue(
-                "dialogue_insufficient", "对话提取不足", SeverityLevel.MODERATE, IssueType.DIALOGUE,
-                f"检测到对话但只提取了{len(dialogues)}条"
+            issues.append(BasicViolation.create_violation(
+                RuleType.DIALOGUE_INSUFFICIENT, issue_value=len(dialogues), severity=SeverityLevel.MODERATE,
             ))
             dialogue_score = 0.3
         elif dialogues:
@@ -763,20 +716,6 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         completeness_score = max(0.0, min(1.0, completeness_score - issue_penalty))
 
         return round(completeness_score, 2), warnings, issues
-
-    def _create_issue(self, rule_code: str, rule_name: str, severity: SeverityLevel, issue_type: IssueType,
-                      description: str, suggestion: str = None) -> BasicViolation:
-        """创建问题对象"""
-        return BasicViolation(
-            rule_code=rule_code,
-            rule_name=rule_name,
-            issue_type=issue_type,
-            source_node=PipelineNode.PARSE_SCRIPT,
-            description=description,
-            severity=severity,
-            fragment_id=None,
-            suggestion=suggestion or "请检查剧本格式"
-        )
 
     def _calculate_confidence(self, script: ParsedScript) -> Dict[str, float]:
         """计算各部分的解析置信度"""

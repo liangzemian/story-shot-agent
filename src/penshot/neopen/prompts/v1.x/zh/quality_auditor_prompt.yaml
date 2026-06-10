@@ -115,6 +115,8 @@ quality_auditor_user:
       - negative_prompt: 负面提示词问题
       - prompt_no_visual: 提示词缺少视觉描述
       - fragment_overlap: 片段间存在时间重叠
+      - missing_prompt: 缺少提示词
+      - duration_mismatch: 时长不匹配
       - other: 其他问题    
       
       issues[i].severity字段必须使用以下KEY值之一：

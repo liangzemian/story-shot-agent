@@ -11,7 +11,7 @@ from typing import Optional, List, Dict
 from penshot.logger import debug, info, error
 from penshot.neopen.agent.base_models import AgentMode
 from penshot.neopen.agent.base_repairable_agent import BaseRepairableAgent
-from penshot.neopen.agent.quality_auditor.quality_auditor_models import BasicViolation, SeverityLevel, IssueType, RuleType
+from penshot.neopen.agent.quality_auditor.quality_auditor_models import BasicViolation, SeverityLevel, RuleType
 from penshot.neopen.agent.script_parser.script_parser_models import ParsedScript
 from penshot.neopen.agent.shot_segmenter.estimator.estimator_enhancer import DurationEnhancer
 from penshot.neopen.agent.shot_segmenter.estimator.estimator_factory import estimator_factory
@@ -165,7 +165,6 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
         if historical_issues:
             debug(f"历史问题数量: {len(historical_issues)}条，将参考避免这些问题")
 
-
     def shot_process(self, structured_script: ParsedScript) -> Optional[ShotSequence]:
         """
         规划剧本的时序分段并估算时长
@@ -250,14 +249,10 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
         issues = []
 
         if not shot_sequence or not shot_sequence.shots:
-            issues.append(BasicViolation(
-                rule_code=RuleType.SHOT_MISSING.code,
-                rule_name=RuleType.SHOT_MISSING.description,
-                issue_type=IssueType.FRAGMENT,
-                source_node=PipelineNode.SEGMENT_SHOT,
-                description="未能生成任何镜头",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.SHOT_MISSING,
                 severity=SeverityLevel.ERROR,
-                fragment_id=None,
+                source_node=PipelineNode.SEGMENT_SHOT,
                 suggestion="请检查剧本结构是否完整"
             ))
             return issues
@@ -267,14 +262,12 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
         # 1. 检查镜头数量合理性
         expected_min_shots = max(1, len(structured_script.scenes) * 2)  # 每场景至少2个镜头
         if len(shots) < expected_min_shots * 0.5:
-            issues.append(BasicViolation(
-                rule_code=RuleType.SHOT_INSUFFICIENT.code,
-                rule_name=RuleType.SHOT_INSUFFICIENT.description,
-                issue_type=IssueType.FRAGMENT,
-                source_node=PipelineNode.SEGMENT_SHOT,
-                description=f"镜头数量不足: {len(shots)}个，预期至少{expected_min_shots}个",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.SHOT_INSUFFICIENT,
+                issue_value=len(shots),
+                standard_value=expected_min_shots,
                 severity=SeverityLevel.MODERATE,
-                fragment_id=None,
+                source_node=PipelineNode.SEGMENT_SHOT,
                 suggestion="每个场景应至少生成2-3个镜头"
             ))
 
@@ -282,54 +275,50 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
         for shot in shots:
             # 时长过短
             if shot.duration < 1.0:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.SHOT_DURATION_TOO_SHORT.code,
-                    rule_name=RuleType.SHOT_DURATION_TOO_SHORT.description,
-                    issue_type=IssueType.DURATION,
-                    source_node=PipelineNode.SEGMENT_SHOT,
-                    description=f"镜头{shot.id}时长过短: {shot.duration}秒",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.SHOT_DURATION_TOO_SHORT,
+                    issue_value=shot.duration,
+                    standard_value=1.0,
                     severity=SeverityLevel.MAJOR,
                     fragment_id=shot.id,
+                    source_node=PipelineNode.SEGMENT_SHOT,
                     suggestion="镜头时长应至少1秒"
                 ))
             # 时长过长
             elif shot.duration > 8.0:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.SHOT_DURATION_TOO_LONG.code,
-                    rule_name=RuleType.SHOT_DURATION_TOO_LONG.description,
-                    issue_type=IssueType.DURATION,
-                    source_node=PipelineNode.SEGMENT_SHOT,
-                    description=f"镜头{shot.id}时长过长: {shot.duration}秒",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.SHOT_DURATION_TOO_LONG,
+                    issue_value=shot.duration,
+                    standard_value=8.0,
                     severity=SeverityLevel.WARNING,
                     fragment_id=shot.id,
+                    source_node=PipelineNode.SEGMENT_SHOT,
                     suggestion="镜头时长应控制在5秒以内，最多不超过8秒"
                 ))
 
         # 3. 检查镜头描述
         for shot in shots:
             if not shot.description or len(shot.description.strip()) < 10:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.SHOT_DESCRIPTION_MISSING.code,
-                    rule_name=RuleType.SHOT_DESCRIPTION_MISSING.description,
-                    issue_type=IssueType.PROMPT,
-                    source_node=PipelineNode.SEGMENT_SHOT,
-                    description=f"镜头{shot.id}描述过短或缺失",
+                desc_len = len(shot.description.strip()) if shot.description else 0
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.SHOT_DESCRIPTION_MISSING,
+                    issue_value=desc_len,
+                    standard_value=10,
                     severity=SeverityLevel.MODERATE,
                     fragment_id=shot.id,
+                    source_node=PipelineNode.SEGMENT_SHOT,
                     suggestion="为镜头添加详细描述，包括构图、动作、情绪等"
                 ))
 
         # 4. 检查镜头类型
         shot_types = [s.shot_type.value for s in shots]
         if len(set(shot_types)) < 2:
-            issues.append(BasicViolation(
-                rule_code=RuleType.SHOT_TYPE_UNIFORM.code,
-                rule_name=RuleType.SHOT_TYPE_UNIFORM.description,
-                issue_type=IssueType.STYLE,
-                source_node=PipelineNode.SEGMENT_SHOT,
-                description=f"镜头类型过于单一: 只有{shot_types[0] if shot_types else '无'}",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.SHOT_TYPE_UNIFORM,
+                issue_value=len(set(shot_types)),
+                standard_value=2,
                 severity=SeverityLevel.WARNING,
-                fragment_id=None,
+                source_node=PipelineNode.SEGMENT_SHOT,
                 suggestion="使用多种镜头类型（远景、中景、特写等）增加视觉层次"
             ))
 
@@ -348,14 +337,11 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
                 pair_key = f"{curr_shot.id}_{next_shot.id}"
                 if pair_key not in seen_repetitive_pairs:
                     seen_repetitive_pairs.add(pair_key)
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.SHOT_REPETITIVE.code,
-                        rule_name=RuleType.SHOT_REPETITIVE.description,
-                        issue_type=IssueType.CONTINUITY,
-                        source_node=PipelineNode.SEGMENT_SHOT,
-                        description=f"镜头{curr_shot.id}和{next_shot.id}类型相同且连续",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.SHOT_REPETITIVE,
                         severity=SeverityLevel.WARNING,
                         fragment_id=curr_shot.id,
+                        source_node=PipelineNode.SEGMENT_SHOT,
                         suggestion="考虑切换不同镜头类型增加变化"
                     ))
 
@@ -369,19 +355,16 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
             expected_chars = {c.name for c in structured_script.characters}
             missing_chars = expected_chars - characters_in_shots
             if missing_chars:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.CHARACTER_NOT_IN_SHOTS.code,
-                    rule_name=RuleType.CHARACTER_NOT_IN_SHOTS.description,
-                    issue_type=IssueType.CHARACTER,
-                    source_node=PipelineNode.SEGMENT_SHOT,
-                    description=f"角色未在镜头中出现: {', '.join(missing_chars)}",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.CHARACTER_NOT_IN_SHOTS,
+                    issue_value=', '.join(sorted(missing_chars)),
+                    standard_value=', '.join(sorted(expected_chars)),
                     severity=SeverityLevel.MODERATE,
-                    fragment_id=None,
+                    source_node=PipelineNode.SEGMENT_SHOT,
                     suggestion="确保所有主要角色都有对应的镜头"
                 ))
 
         return issues
-
 
     def repair_shots(self, shot_sequence: ShotSequence, issues: List[BasicViolation],
                      structured_script: ParsedScript) -> ShotSequence:

@@ -15,7 +15,7 @@ from penshot.neopen.agent.base_llm_agent import BaseLLMAgent
 from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIVideoInstructions, AIVideoPrompt
 from penshot.neopen.agent.quality_auditor.base_quality_auditor import BaseQualityAuditor
 from penshot.neopen.agent.quality_auditor.quality_auditor_models import (
-    QualityAuditReport, AuditStatus, IssueType, SeverityLevel, RuleType
+    QualityAuditReport, AuditStatus, IssueType, SeverityLevel
 )
 from penshot.neopen.shot_config import ShotConfig
 from penshot.utils.log_utils import print_log_exception
@@ -171,7 +171,6 @@ class LLMQualityAuditor(BaseQualityAuditor, BaseLLMAgent):
             ""
         ])
 
-
     def _should_run_llm_audit(self, instructions: AIVideoInstructions) -> bool:
         """判断是否应该执行LLM审查"""
         if self.last_llm_result is None:
@@ -181,7 +180,6 @@ class LLMQualityAuditor(BaseQualityAuditor, BaseLLMAgent):
         if len(instructions.fragments) != len(self.last_llm_result.get("fragments_checked", [])):
             return True
         return False
-
 
     def _build_audit_prompt(self, instructions: AIVideoInstructions) -> str:
         """构建审查提示词"""
@@ -357,11 +355,11 @@ class LLMQualityAuditor(BaseQualityAuditor, BaseLLMAgent):
         )
 
         for issue in llm_result.get("issues", []):
-            self._add_violation(
+            self._add_base_violation(
                 report=report,
-                rule_type=RuleType.LLM_COHERENCE,
+                issue_code=issue.get("code", ""),
                 issue_type=issue.get("type", IssueType.OTHER),
-                description=issue.get("description", ""),
+                issue_desc=issue.get("description", ""),
                 severity=issue.get("severity", SeverityLevel.WARNING),
                 fragment_id=issue.get("fragment_id"),
                 suggestion=issue.get("suggestion")

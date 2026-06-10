@@ -54,6 +54,7 @@ class IssueType(str, Enum):
     STYLE = "style"                 # 风格问题
     MODEL = "model"                 # 模型问题
     FRAGMENT = "fragment"           # 片段问题
+    SHOT = "shot"                   # 镜头问题
     CONTINUITY = "continuity"       # 连续性问题
     TRUNCATION = "truncation"       # 截断问题
     FORMAT = "format"               # 格式问题
@@ -248,11 +249,24 @@ class RuleType(str, Enum):
 
 class BasicViolation(BaseModel):
     """MVP违规记录"""
-    rule_code: str = Field(..., description="规则编码")
-    rule_name: str = Field(..., description="规则名称")
-    description: str = Field(..., description="违规描述")
     issue_type: IssueType = Field(..., description="问题类型")
-    source_node: PipelineNode = Field(..., description="原节点")
+    issue_code: Optional[str] = Field(
+        default=None,
+        description="问题子类型，如 'empty', 'too_long', 'missing_character' 等"
+    )
+    issue_desc: Optional[str] = Field(
+        default=None,
+        description="问题描述"
+    )
+    issue_value: Optional[Any] = Field(
+        default=None,
+        description="问题值，如 '508' 等"
+    )
+    standard_value: Optional[Any] = Field(
+        default=None,
+        description="标准规范值"
+    )
+    source_node: Optional[PipelineNode] = Field(default=None, description="问题来源阶段")
     severity: Literal[SeverityLevel.INFO, SeverityLevel.WARNING, SeverityLevel.ERROR,
     SeverityLevel.MAJOR, SeverityLevel.MODERATE, SeverityLevel.CRITICAL] = Field(
         default=SeverityLevel.WARNING,
@@ -272,16 +286,45 @@ class BasicViolation(BaseModel):
     def from_dict(cls, data: Dict[str, Any]) -> 'BasicViolation':
         """从字典创建实例"""
         return cls(
-            rule_code=data.get("rule_code", ""),
-            rule_name=data.get("rule_name", ""),
+            issue_code=data.get("issue_code", ""),
             issue_type=IssueType(data.get("issue_type", "other")),
-            description=data.get("description", ""),
+            issue_desc=data.get("issue_desc", ""),
             severity=SeverityLevel(data.get("severity", "warning")),
             fragment_id=data.get("fragment_id"),
             suggestion=data.get("suggestion"),
             source_node=PipelineNode(data.get("source_node")) if data.get("source_node") else None
         )
 
+    @classmethod
+    def create(cls, issue_code: str, issue_type: IssueType, issue_desc: str,
+                            issue_value: Optional[Any] = None, standard_value: Optional[Any] = None,
+                            severity: SeverityLevel = SeverityLevel.WARNING,
+                            fragment_id: Optional[str] = None,
+                            suggestion: Optional[str] = None,
+                            source_node: PipelineNode = PipelineNode.AUDIT_QUALITY) -> 'BasicViolation':
+        """添加违规记录"""
+        return BasicViolation(
+            issue_type=issue_type,
+            issue_code=issue_code,
+            issue_desc=issue_desc,
+            issue_value=issue_value,
+            standard_value=standard_value,
+            source_node=source_node,
+            severity=severity,
+            fragment_id=fragment_id,
+            suggestion=suggestion
+        )
+
+    @classmethod
+    def create_violation(cls, rule_type: RuleType,
+                       issue_value: Optional[Any] = None, standard_value: Optional[Any] = None,
+                       severity: SeverityLevel = SeverityLevel.WARNING,
+                       fragment_id: Optional[str] = None, suggestion: Optional[str] = None,
+                       source_node: PipelineNode = PipelineNode.AUDIT_QUALITY) -> 'BasicViolation':
+        """添加违规记录"""
+        return cls.create(issue_code=rule_type.code, issue_type=rule_type.issue_type, issue_desc=rule_type.description,
+                                 issue_value=issue_value, standard_value=standard_value,
+                                 severity=severity, fragment_id=fragment_id, suggestion=suggestion, source_node=source_node)
 
 
 class QualityRepairParams(BaseModel):

@@ -96,12 +96,26 @@ quality_auditor_user:
       - CHARACTER: 角色问题
       - ACTION: 动作问题
       - DIALOGUE: 对话问题
-      - PROMPT: 提示词质量问题
+      - PROMPT: 提示词问题
       - DURATION: 时长问题
       - STYLE: 风格问题
       - FRAGMENT: 片段分隔或分镜问题
-      - MODEL: 模型相关问题
+      - MODEL: 模型问题
+      - AUDIO: 音频问题
+      - CONTINUITY: 连续性问题
+      - FORMAT: 格式问题
+      - COMPLETENESS: 完整性问题
+      - SHOT: 镜头问题
       - OTHER: 其他问题
+
+      issues[i].code 为 issues[i].type 的具体编码，例如，以下KEY值：
+      - shot_desc: 镜头描述问题
+      - fragment_time: 片段时间问题
+      - prompt_quality: 提示词质量问题
+      - negative_prompt: 负面提示词问题
+      - prompt_no_visual: 提示词缺少视觉描述
+      - fragment_overlap: 片段间存在时间重叠
+      - other: 其他问题    
       
       issues[i].severity字段必须使用以下KEY值之一：
       - INFO: 信息级别，不影响执行
@@ -117,7 +131,8 @@ quality_auditor_user:
         "issues": [
           {{
             "type": "CHARACTER",
-            "description": "问题描述",
+            "code": "character_missing",
+            "description": "问题描述，如：角色缺失",
             "severity": "WARNING",
             "fragment_id": "涉及片段ID",
             "suggestion": "修复建议"

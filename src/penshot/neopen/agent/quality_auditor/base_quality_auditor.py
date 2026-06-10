@@ -9,11 +9,11 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
+from penshot.logger import info
 from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIVideoInstructions
 from penshot.neopen.agent.quality_auditor.quality_auditor_models import QualityAuditReport, BasicViolation, SeverityLevel, AuditStatus, RuleType, IssueType
 from penshot.neopen.agent.workflow.workflow_models import PipelineNode
 from penshot.neopen.shot_config import ShotConfig
-from penshot.logger import info
 
 
 class BaseQualityAuditor(ABC):
@@ -373,19 +373,34 @@ class BaseQualityAuditor(ABC):
             "checked_at": datetime.now().isoformat()
         })
 
-    def _add_violation(self, report: QualityAuditReport, rule_type: RuleType, issue_type: IssueType,
-                       description: str, severity: SeverityLevel = SeverityLevel.WARNING,
-                       fragment_id: Optional[str] = None, suggestion: Optional[str] = None,
-                       source_node: PipelineNode = PipelineNode.AUDIT_QUALITY) -> None:
+    def _add_base_violation(self, report: QualityAuditReport,
+                            issue_code: str, issue_type: IssueType, issue_desc: str,
+                            issue_value: Optional[Any] = None, standard_value: Optional[Any] = None,
+                            severity: SeverityLevel = SeverityLevel.WARNING,
+                            fragment_id: Optional[str] = None,
+                            suggestion: Optional[str] = None,
+                            source_node: PipelineNode = PipelineNode.AUDIT_QUALITY) -> None:
         """添加违规记录"""
-        violation = BasicViolation(
-            rule_code=rule_type.code,
-            rule_name=rule_type.description,
+        violation = BasicViolation.create(
             issue_type=issue_type,
+            issue_code=issue_code,
+            issue_desc=issue_desc,
+            issue_value=issue_value,
+            standard_value=standard_value,
             source_node=source_node,
-            description=description,
             severity=severity,
             fragment_id=fragment_id,
             suggestion=suggestion
         )
         report.violations.append(violation)
+
+    def _add_violation(self, report: QualityAuditReport,
+                       rule_type: RuleType,
+                       issue_value: Optional[Any] = None, standard_value: Optional[Any] = None,
+                       severity: SeverityLevel = SeverityLevel.WARNING,
+                       fragment_id: Optional[str] = None, suggestion: Optional[str] = None,
+                       source_node: PipelineNode = PipelineNode.AUDIT_QUALITY) -> None:
+        """添加违规记录"""
+        self._add_base_violation(report, issue_code=rule_type.code, issue_type=rule_type.issue_type, issue_desc=rule_type.description,
+                                 issue_value=issue_value, standard_value=standard_value,
+                                 severity=severity, fragment_id=fragment_id, suggestion=suggestion, source_node=source_node)

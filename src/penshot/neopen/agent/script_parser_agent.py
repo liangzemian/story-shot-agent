@@ -398,6 +398,9 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         """
         info(f"开始修复剧本，发现{len(issues)}个问题")
 
+        for issue in issues:
+            debug(f"  问题: rule_code={issue.rule_code}, description={issue.description[:50]}...")
+
         # 记录原始状态用于对比
         original_stats = {
             "scene_count": len(parsed_script.scenes),
@@ -406,12 +409,12 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
         }
 
         # 问题分类
-        scene_issues = [i for i in issues if 'scene' in i.rule_code]
-        character_issues = [i for i in issues if 'character' in i.rule_code]
-        dialogue_issues = [i for i in issues if 'dialogue' in i.rule_code]
-        action_issues = [i for i in issues if 'action' in i.rule_code]
-        format_issues = [i for i in issues if 'format' in i.rule_code]
-        consistency_issues = [i for i in issues if 'inconsistent' in i.rule_code]
+        scene_issues = [i for i in issues if i.issue_type == IssueType.SCENE]
+        character_issues = [i for i in issues if IssueType.CHARACTER == i.issue_type]
+        dialogue_issues = [i for i in issues if IssueType.DIALOGUE == i.issue_type]
+        action_issues = [i for i in issues if IssueType.ACTION == i.issue_type]
+        format_issues = [i for i in issues if IssueType.FORMAT == i.issue_type]
+        consistency_issues = [i for i in issues if IssueType.CONTINUITY == i.issue_type]
 
         # 记录修复操作
         repair_actions = []

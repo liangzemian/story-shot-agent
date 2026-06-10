@@ -470,6 +470,9 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
         """
         info(f"开始修复提示词，发现{len(issues)}个问题")
 
+        for issue in issues:
+            debug(f"  提示词问题: rule_code={issue.rule_code}, description={issue.description[:50]}, fragment_id={issue.fragment_id}")
+
         # 记录原始状态
         original_stats = {
             "prompt_count": len(instructions.fragments),

@@ -9,8 +9,9 @@ import time
 from typing import Optional, List, Dict
 
 from penshot.logger import debug, info, error
-from penshot.neopen.agent.base_models import AgentMode
+from penshot.neopen.agent.base_models import AgentMode, ElementType
 from penshot.neopen.agent.base_repairable_agent import BaseRepairableAgent
+from penshot.neopen.agent.quality_auditor.quality_auditor_enum import IssueType
 from penshot.neopen.agent.quality_auditor.quality_auditor_models import BasicViolation, SeverityLevel, RuleType
 from penshot.neopen.agent.script_parser.script_parser_models import ParsedScript
 from penshot.neopen.agent.shot_segmenter.estimator.estimator_enhancer import DurationEnhancer
@@ -390,12 +391,13 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
 
         repair_actions = []
 
-        # 问题分类
-        duration_issues = [i for i in issues if 'duration' in i.rule_code]
-        description_issues = [i for i in issues if 'description' in i.rule_code]
-        type_issues = [i for i in issues if 'type' in i.rule_code]
-        repetitive_issues = [i for i in issues if 'repetitive' in i.rule_code]
-        character_issues = [i for i in issues if 'character' in i.rule_code]
+        # 问题分类 - 使用 issue_type 进行主分类，更精确和类型安全
+        duration_issues = [i for i in issues if i.issue_type == IssueType.DURATION]
+        description_issues = [i for i in issues if i.issue_type == IssueType.PROMPT and
+                             ('description' in (i.issue_code or '') or 'desc' in (i.issue_code or ''))]
+        type_issues = [i for i in issues if i.issue_code in ['shot_type_uniform', 'shot_type_invalid', 'shot_type_mismatch']]
+        repetitive_issues = [i for i in issues if i.issue_code == 'shot_repetitive']
+        character_issues = [i for i in issues if i.issue_type == IssueType.CHARACTER]
 
         # ========== 1. 修复时长问题 ==========
         if duration_issues:
@@ -408,11 +410,11 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
                 if not shot:
                     continue
 
-                if '过短' in issue.description:
+                if '过短' in issue.issue_desc:
                     old_duration = shot.duration
                     shot.duration = 2.0  # 修复为2秒
                     repair_actions.append(f"调整过短时长: {shot_id} {old_duration}s -> 2.0s")
-                elif '过长' in issue.description:
+                elif '过长' in issue.issue_desc:
                     old_duration = shot.duration
                     shot.duration = min(5.0, old_duration * 0.7)  # 减少30%
                     repair_actions.append(f"调整过长时长: {shot_id} {old_duration}s -> {shot.duration:.1f}s")
@@ -433,10 +435,10 @@ class ShotSegmenterAgent(BaseRepairableAgent[ShotSequence, ParsedScript]):
                     for scene in structured_script.scenes:
                         for elem in scene.elements:
                             if elem.id in shot.element_ids:
-                                if elem.type.value == "action":
+                                if elem.type == ElementType.ACTION:
                                     shot.description = f"{shot.description or ''} {elem.content}".strip()
                                     repair_actions.append(f"补充镜头描述: {shot_id} 从动作元素")
-                                elif elem.type.value == "dialogue":
+                                elif elem.type == ElementType.DIALOGUE:
                                     shot.description = f"{shot.description or ''} {elem.character}说: {elem.content[:50]}".strip()
                                     repair_actions.append(f"补充镜头描述: {shot_id} 从对话元素")
                                 break

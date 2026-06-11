@@ -291,52 +291,52 @@ class ScriptParserAgent(BaseRepairableAgent[ParsedScript, str]):
                         suggestion=f"请确保所有引用的角色都在characters列表中（当前引用：'{elem.character}'）"
                     ))
 
-            # ========== 新增：6. 检查时长合理性 ==========
-            total_duration = sum(e.duration for s in parsed_script.scenes for e in s.elements)
-            if total_duration > 0:
-                # 检查是否有过短的片段
-                short_elements = [e for s in parsed_script.scenes for e in s.elements if e.duration < 1.0]
-                if short_elements:
-                    issues.append(BasicViolation.create_violation(
-                        rule_type=RuleType.ELEMENT_DURATION_TOO_SHORT,
-                        severity=SeverityLevel.WARNING,
-                        source_node=PipelineNode.PARSE_SCRIPT,
-                        suggestion="每个元素时长应至少1秒"
-                    ))
+        # ========== 新增：6. 检查时长合理性 ==========
+        total_duration = sum(e.duration for s in parsed_script.scenes for e in s.elements)
+        if total_duration > 0:
+            # 检查是否有过短的片段
+            short_elements = [e for s in parsed_script.scenes for e in s.elements if e.duration < 1.0]
+            if short_elements:
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.ELEMENT_DURATION_TOO_SHORT,
+                    severity=SeverityLevel.WARNING,
+                    source_node=PipelineNode.PARSE_SCRIPT,
+                    suggestion="每个元素时长应至少1秒"
+                ))
 
-            # ========== 新增：7. 检查元素顺序 ==========
-            for scene in parsed_script.scenes:
-                sequences = [e.sequence for e in scene.elements]
-                if sequences != sorted(sequences):
-                    issues.append(BasicViolation.create_violation(
-                        rule_type=RuleType.ELEMENT_SEQUENCE_WRONG,
-                        severity=SeverityLevel.MODERATE,
-                        source_node=PipelineNode.PARSE_SCRIPT,
-                        suggestion="按剧情发展顺序排列元素"
-                    ))
+        # ========== 新增：7. 检查元素顺序 ==========
+        for scene in parsed_script.scenes:
+            sequences = [e.sequence for e in scene.elements]
+            if sequences != sorted(sequences):
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.ELEMENT_SEQUENCE_WRONG,
+                    severity=SeverityLevel.MODERATE,
+                    source_node=PipelineNode.PARSE_SCRIPT,
+                    suggestion="按剧情发展顺序排列元素"
+                ))
 
-            # ========== 新增：8. 检查情感标注 ==========
-            for scene in parsed_script.scenes:
-                for elem in scene.elements:
-                    if elem.type == ElementType.DIALOGUE and (not elem.emotion or elem.emotion == "neutral"):
-                        # 对话内容可能包含情感，但标注为中性
-                        if any(word in elem.content.lower() for word in ["笑", "开心", "哭", "伤心", "怒", "生气"]):
-                            issues.append(BasicViolation.create_violation(
-                                rule_type=RuleType.EMOTION_MISMATCH,
-                                severity=SeverityLevel.INFO,
-                                source_node=PipelineNode.PARSE_SCRIPT,
-                                suggestion="根据对话内容标注正确的情感"
-                            ))
+        # ========== 新增：8. 检查情感标注 ==========
+        for scene in parsed_script.scenes:
+            for elem in scene.elements:
+                if elem.type == ElementType.DIALOGUE and (not elem.emotion or elem.emotion == "neutral"):
+                    # 对话内容可能包含情感，但标注为中性
+                    if any(word in elem.content.lower() for word in ["笑", "开心", "哭", "伤心", "怒", "生气"]):
+                        issues.append(BasicViolation.create_violation(
+                            rule_type=RuleType.EMOTION_MISMATCH,
+                            severity=SeverityLevel.INFO,
+                            source_node=PipelineNode.PARSE_SCRIPT,
+                            suggestion="根据对话内容标注正确的情感"
+                        ))
 
-            # ========== 新增：9. 检查角色描述完整性 ==========
-            for char in parsed_script.characters:
-                if not char.description or len(char.description) < 5:
-                    issues.append(BasicViolation.create_violation(
-                        rule_type=RuleType.CHARACTER_DESC_MISSING,
-                        severity=SeverityLevel.WARNING,
-                        source_node=PipelineNode.PARSE_SCRIPT,
-                        suggestion=f"为角色'{char.name}'添加外貌、性格等描述信息"
-                    ))
+        # ========== 新增：9. 检查角色描述完整性 ==========
+        for char in parsed_script.characters:
+            if not char.description or len(char.description) < 5:
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.CHARACTER_DESC_MISSING,
+                    severity=SeverityLevel.WARNING,
+                    source_node=PipelineNode.PARSE_SCRIPT,
+                    suggestion=f"为角色'{char.name}'添加外貌、性格等描述信息"
+                ))
 
         return issues
 

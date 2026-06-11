@@ -235,8 +235,9 @@ class BaseQualityAuditor(ABC):
         for severity in SeverityLevel:
             severity_violations = [
                 {
-                    "rule_name": v.rule_name,
-                    "description": v.description,
+                    "issue_code": v.issue_code,
+                    "issue_type": v.issue_type,
+                    "issue_desc": v.issue_desc,
                     "fragment_id": v.fragment_id,
                     "suggestion": v.suggestion
                 }
@@ -253,8 +254,9 @@ class BaseQualityAuditor(ABC):
                     fragment_violations[frag_id] = []
                 fragment_violations[frag_id].append({
                     "severity": violation.severity.value,
-                    "rule_name": violation.rule_name,
-                    "description": violation.description
+                    "issue_type": violation.issue_type,
+                    "issue_code": violation.issue_code,
+                    "issue_desc": violation.issue_desc
                 })
 
         # 识别高风险片段（有严重或主要问题的片段）
@@ -311,7 +313,7 @@ class BaseQualityAuditor(ABC):
                 SeverityLevel.CRITICAL,
                 SeverityLevel.ERROR
             ]:
-                actions.append(f"修复: {violation.rule_name} - {violation.suggestion}")
+                actions.append(f"修复: {violation.issue_code} - {violation.issue_desc}")
 
         return list(set(actions))  # 去重
 

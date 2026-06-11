@@ -437,8 +437,8 @@ class PipelineDecision:
             error_count = sum(1 for v in violations if v.severity in [SeverityLevel.ERROR, SeverityLevel.CRITICAL])
             warning_count = sum(1 for v in violations if v.severity == SeverityLevel.WARNING)
 
-            # 分类问题
-            critical_types = [v.rule_name for v in violations if v.severity in [SeverityLevel.ERROR, SeverityLevel.CRITICAL]]
+            # 分类问题 - 使用 issue_code 获取问题类型标识
+            critical_types = [v.issue_code or v.issue_type.value for v in violations if v.severity in [SeverityLevel.ERROR, SeverityLevel.CRITICAL]]
             critical_summary = ", ".join(critical_types[:3])
 
             if error_count > 0:

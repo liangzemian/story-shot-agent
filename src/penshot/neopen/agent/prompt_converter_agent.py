@@ -460,13 +460,16 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
 
         repair_actions = []
 
-        # 问题分类
-        empty_issues = [i for i in issues if 'empty' in i.rule_code]
-        length_issues = [i for i in issues if 'too_long' in i.rule_code or 'too_short' in i.rule_code]
-        truncated_issues = [i for i in issues if 'truncated' in i.rule_code]
-        style_issues = [i for i in issues if 'style' in i.rule_code]
-        negative_issues = [i for i in issues if 'negative' in i.rule_code]
-        audio_issues = [i for i in issues if 'audio' in i.rule_code]
+        # 问题分类 - 使用 issue_type 进行主分类，更精确和类型安全
+        empty_issues = [i for i in issues if i.issue_code in ['prompt_empty', 'prompt_missing']]
+        length_issues = [i for i in issues if i.issue_type == IssueType.PROMPT and
+                        i.issue_code in ['prompt_too_long', 'prompt_too_short']]
+        truncated_issues = [i for i in issues if i.issue_type == IssueType.TRUNCATION or
+                           i.issue_code in ['prompt_truncated', 'prompt_incomplete', 'text_truncated']]
+        style_issues = [i for i in issues if i.issue_type == IssueType.STYLE]
+        negative_issues = [i for i in issues if i.issue_code in ['negative_prompt_missing', 'negative_prompt_insufficient']]
+        audio_issues = [i for i in issues if i.issue_type == IssueType.AUDIO]
+
 
         # 创建片段ID到原始片段的映射
         fragment_map = {f.id: f for f in fragment_sequence.fragments}
@@ -500,12 +503,12 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                     continue
 
                 prompt_length = only_count_en(prompt.prompt)
-                if '过长' in issue.description and prompt_length > self.config.prompt_length_max_threshold:
+                if '过长' in (issue.issue_desc or '') and prompt_length > self.config.prompt_length_max_threshold:
                     # 截断提示词
                     prompt.prompt = prompt.prompt[:self.config.prompt_length_max_threshold] + "..."
                     repair_actions.append(f"截断过长提示词: {fragment_id} {prompt_length} -> {self.config.prompt_length_max_threshold} 个单词")
 
-                elif '过短' in issue.description and prompt_length < self.config.prompt_length_min_threshold:
+                elif '过短' in (issue.issue_desc or '') and prompt_length < self.config.prompt_length_min_threshold:
                     # 扩展提示词
                     if fragment_id in fragment_map:
                         fragment = fragment_map[fragment_id]

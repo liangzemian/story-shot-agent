@@ -147,11 +147,10 @@ class ContinuityIssue(BaseModel):
             ContinuityIssueType.PROP_CHANGE: IssueType.CONTINUITY,
         }
 
-        return BasicViolation(
-            rule_code=f"continuity_{self.type.value}",
-            rule_name=f"连续性检查: {self.type.value}",
+        return BasicViolation.create(
+            issue_code=f"continuity_{self.type.value}",
             issue_type=issue_type_mapping.get(self.type, IssueType.CONTINUITY),
-            description=self.description,
+            issue_desc=self.description,
             severity=severity_mapping.get(self.severity, SeverityLevel.MODERATE),
             fragment_id=self.fragment_id,
             suggestion=self.suggestion,

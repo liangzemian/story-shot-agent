@@ -208,9 +208,9 @@ class LLMPromptConverter(BasePromptConverter, BaseLLMAgent):
         from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIAudioPrompt, AudioModelType, AudioVoiceType
 
         for prompt in instructions.fragments:
-            if not prompt.audio_prompt:
+            if not prompt.audio:
                 # 创建默认音频提示词
-                prompt.audio_prompt = AIAudioPrompt(
+                prompt.audio = AIAudioPrompt(
                     audio_id=f"audio{prompt.fragment_id[4:]}",
                     prompt=f"音频片段，时长{prompt.duration}秒",
                     model_type=AudioModelType.XTTSv2,
@@ -218,9 +218,9 @@ class LLMPromptConverter(BasePromptConverter, BaseLLMAgent):
                     duration_seconds=prompt.duration
                 )
                 info(f"创建默认音频提示词: {prompt.fragment_id}")
-            elif prompt.audio_prompt.duration_seconds and abs(prompt.audio_prompt.duration_seconds - prompt.duration) > 0.5:
+            elif prompt.audio.duration_seconds and abs(prompt.audio.duration_seconds - prompt.duration) > 0.5:
                 # 修复时长不匹配
-                prompt.audio_prompt.duration_seconds = prompt.duration
+                prompt.audio.duration_seconds = prompt.duration
                 info(f"修复音频时长: {prompt.fragment_id} -> {prompt.duration}s")
 
         return instructions
@@ -343,8 +343,8 @@ class LLMPromptConverter(BasePromptConverter, BaseLLMAgent):
         combined_prompt = f"{english_prompt}\n\n{original_prompt}"
 
         # 解析LLM返回的音频提示词
-        audio_prompt = self._build_audio_prompt_from_llm_result(result, fragment)
-        self.last_audio_id = audio_prompt.audio_id if audio_prompt else self.last_audio_id
+        audio = self._build_audio_prompt_from_llm_result(result, fragment)
+        self.last_audio_id = audio.audio_id if audio else self.last_audio_id
 
         return AIVideoPrompt(
             fragment_id=fragment.id,
@@ -354,7 +354,7 @@ class LLMPromptConverter(BasePromptConverter, BaseLLMAgent):
             duration=fragment.duration,
             model=self.config.video_model,
             style=result.get("style_hint"),
-            audio_prompt=audio_prompt
+            audio=audio
         )
 
 

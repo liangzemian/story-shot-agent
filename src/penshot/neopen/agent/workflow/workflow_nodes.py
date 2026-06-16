@@ -558,7 +558,7 @@ class WorkflowNodes:
             self._update_task_progress(state.input.task_id, TaskStage.CONVERT_COMPLETE, 100)
             self._complete_stage(state.input.task_id, TaskStage.CONVERT_COMPLETE, {
                 "prompt_count": len(instructions.fragments),
-                "audio_prompt_count": sum(1 for f in instructions.fragments if f.audio_prompt)
+                "audio_prompt_count": sum(1 for f in instructions.fragments if f.audio)
             })
 
             if not instructions:
@@ -583,7 +583,7 @@ class WorkflowNodes:
                   f"最小={min(prompt_lengths)}, 最大={max(prompt_lengths)}")
 
             # 统计音频提示词
-            audio_count = sum(1 for f in instructions.fragments if f.audio_prompt)
+            audio_count = sum(1 for f in instructions.fragments if f.audio)
             debug(f"音频提示词: {audio_count}/{len(instructions.fragments)}个片段")
 
             # 统计风格分布
@@ -659,7 +659,10 @@ class WorkflowNodes:
             current_time = datetime.now()
             time_diff = (current_time - last_time).total_seconds()
 
-            has_new_repair = bool(state.domain.repair_params)
+            # 只有在真正重复时才跳过（检查是否有新的修复参数需要应用）
+            has_new_repair = state.domain.repair_params and any(
+                p.fix_needed for p in state.domain.repair_params.values()
+            ) if state.domain.repair_params else False
 
             if time_diff < 10 and not has_new_repair:
                 info(f"质量审查在 {time_diff:.1f} 秒内重复调用，"

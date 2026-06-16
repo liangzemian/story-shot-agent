@@ -59,7 +59,7 @@ data = {
           "model": "runway_gen2",
           "style": "cinematic realism, Fujifilm ETERNA grading, natural overcast lighting, 35mm lens",
           "requires_special_attention": 0,
-          "audio_prompt": {
+          "audio": {
             "audio_id": "audio_001",
             "prompt": "low-frequency office ambient noise (HVAC hum + tactile mechanical keyboard clatter), subtle rhythmic keystrokes, faint intermittent terminal beep alerts, quiet air movement through blinds, no speech or music\n\n低频办公环境底噪（空调持续嗡鸣+机械键盘敲击声），细微有节奏的按键声，终端偶尔发出的短促‘滴’提示音，百叶窗缝隙间轻微气流声，无语音、无音乐",
             "negative_prompt": "human voice, phone ringtone, footsteps, laughter, sudden loud sounds, music, distortion, silence-only",
@@ -92,7 +92,7 @@ data = {
           "model": "runway_gen2",
           "style": "cinematic realism, Fujifilm ETERNA, natural overcast, 35mm",
           "requires_special_attention": 0,
-          "audio_prompt": {
+          "audio": {
             "audio_id": "audio_002",
             "prompt": "low-frequency office ambient noise (HVAC hum + light keyboard clatter), sudden crisp short electronic ringtone (high-pitched, 120ms duration, clean decay), subtle fabric rustle from sleeve movement, faint finger hover micro-sound above mechanical switches\n\n低频办公环境底噪（空调持续嗡鸣+轻微键盘敲击余响），突发清脆短促电子铃声（高音调、120毫秒、干净衰减），卫衣袖口滑动产生的细微布料摩擦声，手指悬停于机械键盘上方的极轻微气流声",
             "negative_prompt": "voice dialogue, footsteps, music, reverb-heavy ringtone, distorted audio, overlapping sounds, silence longer than 0.3s",

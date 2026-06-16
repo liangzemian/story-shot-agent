@@ -14,7 +14,7 @@ from penshot.neopen.agent.base_repairable_agent import BaseRepairableAgent
 from penshot.neopen.agent.continuity_guardian.consistency_contract import GlobalConsistencyContract
 from penshot.neopen.agent.prompt_converter.prompt_converter_factory import PromptConverterFactory
 from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIVideoInstructions, AIVideoPrompt
-from penshot.neopen.agent.quality_auditor.quality_auditor_models import BasicViolation, SeverityLevel, IssueType, RuleType
+from penshot.neopen.agent.quality_auditor.quality_auditor_models import BasicViolation, SeverityLevel, RuleType, IssueType
 from penshot.neopen.agent.script_parser.script_parser_models import ParsedScript
 from penshot.neopen.agent.video_splitter.video_splitter_models import FragmentSequence
 from penshot.neopen.agent.workflow.workflow_models import PipelineNode
@@ -144,7 +144,6 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
         if successful_patterns:
             debug(f"已加载 {len(successful_patterns) if isinstance(successful_patterns, list) else 1} 条成功模式")
 
-
     def process_with_style_consistency(self, fragment_sequence: FragmentSequence,
                                        parsed_script: ParsedScript,
                                        contract: GlobalConsistencyContract) -> Optional[AIVideoInstructions]:
@@ -189,7 +188,6 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
             prefix_parts.append(style_desc)
 
         return f"[Style: {', '.join(prefix_parts)}]" if prefix_parts else ""
-
 
     def prompt_process(self, fragment_sequence: FragmentSequence, parsed_script: ParsedScript) -> Optional[AIVideoInstructions]:
         """视频片段转换提示词"""
@@ -240,7 +238,7 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                   f"最小={min(prompt_lengths)}, 最大={max(prompt_lengths)}")
 
             # 记录音频提示词统计
-            audio_count = sum(1 for f in instructions.fragments if f.audio_prompt)
+            audio_count = sum(1 for f in instructions.fragments if f.audio)
             debug(f"音频提示词生成: {audio_count}/{len(instructions.fragments)}个片段")
 
             # 记录修复历史
@@ -280,14 +278,10 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
         issues = []
 
         if not instructions or not instructions.fragments:
-            issues.append(BasicViolation(
-                rule_code=RuleType.PROMPT_MISSING.code,
-                rule_name=RuleType.PROMPT_MISSING.description,
-                issue_type=IssueType.PROMPT,
-                source_node=PipelineNode.CONVERT_PROMPT,
-                description="未能生成任何提示词",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.PROMPT_MISSING,
                 severity=SeverityLevel.ERROR,
-                fragment_id=None,
+                source_node=PipelineNode.CONVERT_PROMPT,
                 suggestion="请检查片段序列是否正确"
             ))
             return issues
@@ -297,14 +291,11 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
         # 1. 检查提示词为空
         for prompt in prompts:
             if not prompt.prompt or not prompt.prompt.strip():
-                issues.append(BasicViolation(
-                    rule_code=RuleType.PROMPT_EMPTY.code,
-                    rule_name=RuleType.PROMPT_EMPTY.description,
-                    issue_type=IssueType.PROMPT,
-                    source_node=PipelineNode.CONVERT_PROMPT,
-                    description=f"片段{prompt.fragment_id}的提示词为空",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.PROMPT_EMPTY,
                     severity=SeverityLevel.ERROR,
                     fragment_id=prompt.fragment_id,
+                    source_node=PipelineNode.CONVERT_PROMPT,
                     suggestion="为片段添加描述性提示词"
                 ))
 
@@ -313,39 +304,34 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
             prompt_length = only_count_en(prompt.prompt)
 
             if prompt_length > self.config.prompt_length_max_threshold:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.PROMPT_TOO_LONG.code,
-                    rule_name=RuleType.PROMPT_TOO_LONG.description,
-                    issue_type=IssueType.PROMPT,
-                    source_node=PipelineNode.CONVERT_PROMPT,
-                    description=f"片段{prompt.fragment_id}提示词过长: {prompt_length}个单词",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.PROMPT_TOO_LONG,
+                    issue_value=prompt_length,
+                    standard_value=self.config.prompt_length_max_threshold,
                     severity=SeverityLevel.WARNING,
                     fragment_id=prompt.fragment_id,
+                    source_node=PipelineNode.CONVERT_PROMPT,
                     suggestion=f"将提示词缩短到{self.config.max_prompt_length}单词以内"
                 ))
             elif prompt_length < self.config.prompt_length_min_threshold:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.PROMPT_TOO_SHORT.code,
-                    rule_name=RuleType.PROMPT_TOO_SHORT.description,
-                    issue_type=IssueType.PROMPT,
-                    source_node=PipelineNode.CONVERT_PROMPT,
-                    description=f"片段{prompt.fragment_id}提示词过短: {prompt_length}个单词",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.PROMPT_TOO_SHORT,
+                    issue_value=prompt_length,
+                    standard_value=self.config.prompt_length_min_threshold,
                     severity=SeverityLevel.WARNING,
                     fragment_id=prompt.fragment_id,
+                    source_node=PipelineNode.CONVERT_PROMPT,
                     suggestion=f"添加更多描述性内容，至少{self.config.min_prompt_length}个单词"
                 ))
 
         # 3. 检查提示词截断
         for prompt in prompts:
             if prompt.prompt.endswith('...') or prompt.prompt.endswith('…'):
-                issues.append(BasicViolation(
-                    rule_code=RuleType.PROMPT_TRUNCATED.code,
-                    rule_name=RuleType.PROMPT_TRUNCATED.description,
-                    issue_type=IssueType.TRUNCATION,
-                    source_node=PipelineNode.CONVERT_PROMPT,
-                    description=f"片段{prompt.fragment_id}提示词可能被截断",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.PROMPT_TRUNCATED,
                     severity=SeverityLevel.MAJOR,
                     fragment_id=prompt.fragment_id,
+                    source_node=PipelineNode.CONVERT_PROMPT,
                     suggestion="检查提示词是否完整，确保没有被截断"
                 ))
 
@@ -355,84 +341,76 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
             if prompt.style:
                 styles.add(prompt.style)
         if len(styles) > 3:
-            issues.append(BasicViolation(
-                rule_code=RuleType.STYLE_INCONSISTENT.code,
-                rule_name=RuleType.STYLE_INCONSISTENT.description,
-                issue_type=IssueType.STYLE,
-                source_node=PipelineNode.CONVERT_PROMPT,
-                description=f"检测到{len(styles)}种不同风格，可能导致视觉不连贯",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.STYLE_INCONSISTENT,
+                issue_value=len(styles),
+                standard_value=3,
                 severity=SeverityLevel.MODERATE,
-                fragment_id=None,
+                source_node=PipelineNode.CONVERT_PROMPT,
                 suggestion="统一使用1-2种视觉风格保持连贯性"
             ))
 
         # 5. 检查负面提示词
         for prompt in prompts:
             if not prompt.negative_prompt or len(prompt.negative_prompt.strip()) < 10:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.NEGATIVE_PROMPT_MISSING.code,
-                    rule_name=RuleType.NEGATIVE_PROMPT_MISSING.description,
-                    issue_type=IssueType.PROMPT,
-                    source_node=PipelineNode.CONVERT_PROMPT,
-                    description=f"片段{prompt.fragment_id}缺少负面提示词",
+                negative_len = len(prompt.negative_prompt.strip()) if prompt.negative_prompt else 0
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.NEGATIVE_PROMPT_MISSING,
+                    issue_value=negative_len,
+                    standard_value=10,
                     severity=SeverityLevel.INFO,
                     fragment_id=prompt.fragment_id,
+                    source_node=PipelineNode.CONVERT_PROMPT,
                     suggestion="添加负面提示词避免生成不良内容"
                 ))
 
         # 6. 检查音频提示词
         for prompt in prompts:
-            if prompt.audio_prompt:
-                audio = prompt.audio_prompt
+            if prompt.audio:
+                audio = prompt.audio
                 # 检查音频提示词长度
                 if len(audio.prompt) < 10:
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.AUDIO_PROMPT_TOO_SHORT.code,
-                        rule_name=RuleType.AUDIO_PROMPT_TOO_SHORT.description,
-                        issue_type=IssueType.AUDIO,
-                        source_node=PipelineNode.CONVERT_PROMPT,
-                        description=f"片段{prompt.fragment_id}音频提示词过短",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.AUDIO_PROMPT_TOO_SHORT,
+                        issue_value=len(audio.prompt),
+                        standard_value=10,
                         severity=SeverityLevel.WARNING,
                         fragment_id=prompt.fragment_id,
+                        source_node=PipelineNode.CONVERT_PROMPT,
                         suggestion="添加更详细的音频描述"
                     ))
                 # 检查音频时长
                 if audio.duration_seconds and abs(audio.duration_seconds - prompt.duration) > 0.5:
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.AUDIO_DURATION_MISMATCH.code,
-                        rule_name=RuleType.AUDIO_DURATION_MISMATCH.description,
-                        issue_type=IssueType.DURATION,
-                        source_node=PipelineNode.CONVERT_PROMPT,
-                        description=f"片段{prompt.fragment_id}音频时长({audio.duration_seconds}s)与视频时长({prompt.duration}s)不匹配",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.AUDIO_DURATION_MISMATCH,
+                        issue_value=audio.duration_seconds,
+                        standard_value=prompt.duration,
                         severity=SeverityLevel.MAJOR,
                         fragment_id=prompt.fragment_id,
+                        source_node=PipelineNode.CONVERT_PROMPT,
                         suggestion="调整音频时长使其与视频片段匹配"
                     ))
             else:
                 # 检查是否应该有音频提示词（基于原始片段是否有对话）
                 if self._should_have_audio(prompt.fragment_id, fragment_sequence):
-                    issues.append(BasicViolation(
-                        rule_code=RuleType.AUDIO_PROMPT_MISSING.code,
-                        rule_name=RuleType.AUDIO_PROMPT_MISSING.description,
-                        issue_type=IssueType.AUDIO,
-                        source_node=PipelineNode.CONVERT_PROMPT,
-                        description=f"片段{prompt.fragment_id}应有音频但未生成",
+                    issues.append(BasicViolation.create_violation(
+                        rule_type=RuleType.AUDIO_PROMPT_MISSING,
                         severity=SeverityLevel.MODERATE,
                         fragment_id=prompt.fragment_id,
+                        source_node=PipelineNode.CONVERT_PROMPT,
                         suggestion="检查片段是否包含对话，为有对话的片段生成音频提示词"
                     ))
 
         # 7. 检查模型支持
         for prompt in prompts:
             if prompt.model != self.config.video_model:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.MODEL_UNSUPPORTED.code,
-                    rule_name=RuleType.MODEL_UNSUPPORTED.description,
-                    issue_type=IssueType.MODEL,
-                    source_node=PipelineNode.CONVERT_PROMPT,
-                    description=f"片段{prompt.fragment_id}使用不支持的模型: {prompt.model}",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.MODEL_UNSUPPORTED,
+                    issue_value=prompt.model,
+                    standard_value=self.config.video_model,
                     severity=SeverityLevel.WARNING,
                     fragment_id=prompt.fragment_id,
+                    source_node=PipelineNode.CONVERT_PROMPT,
                     suggestion=f"使用支持的模型: {', '.join(self.config.supported_models)}"
                 ))
 
@@ -470,22 +448,28 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
         """
         info(f"开始修复提示词，发现{len(issues)}个问题")
 
+        for issue in issues:
+            debug(f"  提示词问题: issue_code={issue.issue_code}, issue_desc={issue.issue_desc[:50]}, fragment_id={issue.fragment_id}")
+
         # 记录原始状态
         original_stats = {
             "prompt_count": len(instructions.fragments),
             "avg_prompt_length": sum(len(p.prompt) for p in instructions.fragments) / len(instructions.fragments) if instructions.fragments else 0,
-            "audio_count": sum(1 for p in instructions.fragments if p.audio_prompt)
+            "audio_count": sum(1 for p in instructions.fragments if p.audio)
         }
 
         repair_actions = []
 
-        # 问题分类
-        empty_issues = [i for i in issues if 'empty' in i.rule_code]
-        length_issues = [i for i in issues if 'too_long' in i.rule_code or 'too_short' in i.rule_code]
-        truncated_issues = [i for i in issues if 'truncated' in i.rule_code]
-        style_issues = [i for i in issues if 'style' in i.rule_code]
-        negative_issues = [i for i in issues if 'negative' in i.rule_code]
-        audio_issues = [i for i in issues if 'audio' in i.rule_code]
+        # 问题分类 - 使用 issue_type 进行主分类，更精确和类型安全
+        empty_issues = [i for i in issues if i.issue_code in ['prompt_empty', 'prompt_missing']]
+        length_issues = [i for i in issues if i.issue_type == IssueType.PROMPT and
+                        i.issue_code in ['prompt_too_long', 'prompt_too_short']]
+        truncated_issues = [i for i in issues if i.issue_type == IssueType.TRUNCATION or
+                           i.issue_code in ['prompt_truncated', 'prompt_incomplete', 'text_truncated']]
+        style_issues = [i for i in issues if i.issue_type == IssueType.STYLE]
+        negative_issues = [i for i in issues if i.issue_code in ['negative_prompt_missing', 'negative_prompt_insufficient']]
+        audio_issues = [i for i in issues if i.issue_type == IssueType.AUDIO]
+
 
         # 创建片段ID到原始片段的映射
         fragment_map = {f.id: f for f in fragment_sequence.fragments}
@@ -519,12 +503,12 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                     continue
 
                 prompt_length = only_count_en(prompt.prompt)
-                if '过长' in issue.description and prompt_length > self.config.prompt_length_max_threshold:
+                if '过长' in (issue.issue_desc or '') and prompt_length > self.config.prompt_length_max_threshold:
                     # 截断提示词
                     prompt.prompt = prompt.prompt[:self.config.prompt_length_max_threshold] + "..."
                     repair_actions.append(f"截断过长提示词: {fragment_id} {prompt_length} -> {self.config.prompt_length_max_threshold} 个单词")
 
-                elif '过短' in issue.description and prompt_length < self.config.prompt_length_min_threshold:
+                elif '过短' in (issue.issue_desc or '') and prompt_length < self.config.prompt_length_min_threshold:
                     # 扩展提示词
                     if fragment_id in fragment_map:
                         fragment = fragment_map[fragment_id]
@@ -606,11 +590,11 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                 if not prompt:
                     continue
 
-                if 'missing' in issue.rule_code:
+                if issue.issue_type == IssueType.AUDIO and 'missing' in issue.issue_code:
                     # 创建默认音频提示词
                     from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIAudioPrompt, AudioModelType, AudioVoiceType
 
-                    prompt.audio_prompt = AIAudioPrompt(
+                    prompt.audio = AIAudioPrompt(
                         audio_id=f"audio{fragment_id[4:]}",
                         prompt=f"音频片段，时长{prompt.duration}秒",
                         model_type=AudioModelType.XTTSv2,
@@ -619,17 +603,17 @@ class PromptConverterAgent(BaseRepairableAgent[AIVideoInstructions, FragmentSequ
                     )
                     repair_actions.append(f"创建默认音频提示词: {fragment_id}")
 
-                elif 'duration_mismatch' in issue.rule_code:
+                elif 'duration_mismatch' in issue.issue_code:
                     # 修复音频时长
-                    if prompt.audio_prompt:
-                        prompt.audio_prompt.duration_seconds = prompt.duration
+                    if prompt.audio:
+                        prompt.audio.duration_seconds = prompt.duration
                         repair_actions.append(f"修复音频时长: {fragment_id} -> {prompt.duration}s")
 
         # ========== 7. 更新统计信息 ==========
         new_stats = {
             "prompt_count": len(instructions.fragments),
             "avg_prompt_length": sum(len(p.prompt) for p in instructions.fragments) / len(instructions.fragments) if instructions.fragments else 0,
-            "audio_count": sum(1 for p in instructions.fragments if p.audio_prompt)
+            "audio_count": sum(1 for p in instructions.fragments if p.audio)
         }
 
         # 记录修复历史

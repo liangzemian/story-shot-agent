@@ -525,6 +525,9 @@ def error(message: str):
 def critical(message: str):
     logger.critical(message)
 
+def exception(message: str):
+    logger.exception(message)
+
 
 def log_with_context(level: str, message: str, context: dict = None) -> None:
     """

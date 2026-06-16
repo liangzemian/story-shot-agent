@@ -11,7 +11,7 @@ from penshot.logger import info, warning
 from penshot.neopen.agent.base_models import parse_model_name
 from penshot.neopen.agent.prompt_converter.prompt_converter_models import AIVideoInstructions
 from penshot.neopen.agent.quality_auditor.base_quality_auditor import BaseQualityAuditor
-from penshot.neopen.agent.quality_auditor.quality_auditor_models import QualityAuditReport, RuleType, SeverityLevel, IssueType
+from penshot.neopen.agent.quality_auditor.quality_auditor_models import QualityAuditReport, RuleType, SeverityLevel
 from penshot.neopen.agent.workflow.workflow_models import PipelineNode
 from penshot.neopen.shot_config import ShotConfig
 from penshot.utils.str_count_utils import only_count_en
@@ -66,9 +66,9 @@ class RuleQualityAuditor(BaseQualityAuditor):
                 self._add_violation(
                     report=report,
                     rule_type=RuleType.FRAGMENT_DURATION_LIMIT,
-                    issue_type=IssueType.DURATION,
                     source_node=PipelineNode.SEGMENT_SHOT,
-                    description=f"片段 {fragment.fragment_id} 时长 {fragment.duration}秒 超过 {self.config.duration_split_threshold}秒 限制",
+                    issue_value=fragment.duration,
+                    standard_value=self.config.duration_split_threshold,
                     severity=SeverityLevel.ERROR,
                     fragment_id=fragment.fragment_id,
                     suggestion=f"将片段时长调整为 ≤{self.config.duration_split_threshold}秒"
@@ -79,9 +79,9 @@ class RuleQualityAuditor(BaseQualityAuditor):
                 self._add_violation(
                     report=report,
                     rule_type=RuleType.FRAGMENT_DURATION_LIMIT,
-                    issue_type=IssueType.DURATION,
                     source_node=PipelineNode.SEGMENT_SHOT,
-                    description=f"片段 {fragment.fragment_id} 时长 {fragment.duration}秒 低于 {self.config.min_fragment_duration}秒 最低要求",
+                    issue_value=fragment.duration,
+                    standard_value=self.config.min_fragment_duration,
                     severity=SeverityLevel.WARNING,
                     fragment_id=fragment.fragment_id,
                     suggestion=f"将片段时长调整为 ≥{self.config.min_fragment_duration}秒"
@@ -103,9 +103,7 @@ class RuleQualityAuditor(BaseQualityAuditor):
                 self._add_violation(
                     report=report,
                     rule_type=RuleType.PROMPT_EMPTY,
-                    issue_type=IssueType.PROMPT,
                     source_node=PipelineNode.CONVERT_PROMPT,
-                    description=f"片段 {fragment.fragment_id} 的提示词为空",
                     severity=SeverityLevel.ERROR,
                     fragment_id=fragment.fragment_id,
                     suggestion="为片段添加描述性的提示词"
@@ -131,8 +129,8 @@ class RuleQualityAuditor(BaseQualityAuditor):
                     report=report,
                     rule_type=RuleType.PROMPT_TOO_LONG,
                     source_node=PipelineNode.CONVERT_PROMPT,
-                    issue_type=IssueType.PROMPT,
-                    description=f"片段 {fragment.fragment_id} 提示词过长: {prompt_length} 单词 (限制长度: {self.config.max_prompt_length} 个单词)",
+                    issue_value=prompt_length,
+                    standard_value=self.config.max_prompt_length,
                     severity=SeverityLevel.WARNING,
                     fragment_id=fragment.fragment_id,
                     suggestion=f"将提示词缩短到{self.config.max_prompt_length} 个单词以内"
@@ -144,8 +142,8 @@ class RuleQualityAuditor(BaseQualityAuditor):
                     report=report,
                     rule_type=RuleType.PROMPT_TOO_SHORT,
                     source_node=PipelineNode.CONVERT_PROMPT,
-                    issue_type=IssueType.PROMPT,
-                    description=f"片段 {fragment.fragment_id} 提示词过短: {prompt_length} 单词 (建议: ≥{self.config.min_prompt_length} 个单词)",
+                    issue_value=prompt_length,
+                    standard_value=self.config.min_prompt_length,
                     severity=SeverityLevel.WARNING,
                     fragment_id=fragment.fragment_id,
                     suggestion="添加更多描述性内容到提示词"
@@ -172,8 +170,6 @@ class RuleQualityAuditor(BaseQualityAuditor):
                 report=report,
                 rule_type=RuleType.FRAGMENT_MISSING,
                 source_node=PipelineNode.SEGMENT_SHOT,
-                issue_type=IssueType.FRAGMENT,
-                description="没有找到任何视频片段",
                 severity=SeverityLevel.ERROR,
             )
             self._add_check(report, check_name, "failed", "没有片段")
@@ -195,8 +191,7 @@ class RuleQualityAuditor(BaseQualityAuditor):
                 report=report,
                 rule_type=RuleType.MODEL_UNSUPPORTED,
                 source_node=PipelineNode.CONVERT_PROMPT,
-                issue_type=IssueType.MODEL,
-                description=f"不支持的AI模型: {', '.join(unique_models)}",
+                issue_value=f"{', '.join(unique_models)}",
                 severity=SeverityLevel.WARNING,
                 suggestion="使用支持的模型: runway_gen2, sora, pika"
             )

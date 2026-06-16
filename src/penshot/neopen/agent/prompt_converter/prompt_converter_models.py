@@ -281,7 +281,7 @@ class AIVideoPrompt(BaseModel):
         description="需要特殊处理的标记"
     )
 
-    audio_prompt: Optional[AIAudioPrompt] = Field(
+    audio: Optional[AIAudioPrompt] = Field(
         default=None,
         description="关联的音频提示词（如果有）"
     )

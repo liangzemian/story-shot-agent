@@ -308,7 +308,7 @@ class QualityAuditorAgent:
             """添加问题（带去重）"""
             # 生成唯一签名
             fragment_id = getattr(violation, 'fragment_id', None) or ''
-            description = getattr(violation, 'description', '')[:150] if getattr(violation, 'description', '') else ''
+            description = getattr(violation, 'issue_desc', '')[:150] if getattr(violation, 'issue_desc', '') else ''
             severity = getattr(violation, 'severity', SeverityLevel.WARNING)
             severity_str = severity.value if hasattr(severity, 'value') else str(severity)
             issue_type = getattr(violation, 'issue_type', IssueType.OTHER)
@@ -344,12 +344,11 @@ class QualityAuditorAgent:
                     if isinstance(issue, dict):
                         # 如果是字典，转换为 BasicViolation 对象
                         try:
-                            basic_issue = BasicViolation(
-                                rule_code=issue.get("rule_code", ""),
-                                rule_name=issue.get("rule_name", ""),
-                                issue_type=IssueType(issue.get("issue_type", IssueType.OTHER.value)),
+                            basic_issue = BasicViolation.create(
+                                issue_code=issue.get("issue_code", ""),
+                                issue_type=issue.get("issue_type", IssueType.OTHER),
+                                issue_desc=issue.get("issue_desc", ""),
                                 source_node=PipelineNode(issue.get("source_node", node.value)),
-                                description=issue.get("description", ""),
                                 severity=SeverityLevel(issue.get("severity", SeverityLevel.WARNING.value)),
                                 fragment_id=issue.get("fragment_id"),
                                 suggestion=issue.get("suggestion")
@@ -660,15 +659,15 @@ class QualityAuditorAgent:
         # 添加到报告
         report.detailed_analysis = {
             "issues_by_source": {
-                source.value: [v.dict() for v in issues]
+                source.value: [v.model_dump() for v in issues]
                 for source, issues in issues_by_source.items() if issues
             },
             "issues_by_type": {
-                issue_type.value: [v.dict() for v in issues]
+                issue_type.value: [v.model_dump() for v in issues]
                 for issue_type, issues in issues_by_type.items() if issues
             },
             "issues_by_severity": {
-                severity.value: [v.dict() for v in issues]
+                severity.value: [v.model_dump() for v in issues]
                 for severity, issues in issues_by_severity.items() if issues
             },
             "repair_params_by_source": {

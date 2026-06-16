@@ -11,7 +11,8 @@ from typing import Optional, List, Dict
 from penshot.logger import debug, error, info
 from penshot.neopen.agent.base_models import AgentMode
 from penshot.neopen.agent.base_repairable_agent import BaseRepairableAgent
-from penshot.neopen.agent.quality_auditor.quality_auditor_models import BasicViolation, SeverityLevel, IssueType, RuleType
+from penshot.neopen.agent.quality_auditor.quality_auditor_enum import IssueType
+from penshot.neopen.agent.quality_auditor.quality_auditor_models import BasicViolation, SeverityLevel, RuleType
 from penshot.neopen.agent.script_parser.script_parser_models import ParsedScript
 from penshot.neopen.agent.shot_segmenter.shot_segmenter_models import ShotSequence
 from penshot.neopen.agent.video_splitter.video_splitter_factory import VideoSplitterFactory
@@ -50,7 +51,6 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
         self._focus_on_continuity: bool = False
         self._focus_on_description_quality: bool = False
         self._need_extra_validation: bool = False
-
 
     def process(self, shot_sequence: ShotSequence, parsed_script: ParsedScript) -> Optional[FragmentSequence]:
         """
@@ -121,7 +121,10 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
         if historical_stats and isinstance(historical_stats, dict):
             avg_fragment_count = historical_stats.get("fragment_count", 0)
             avg_duration = historical_stats.get("avg_duration", 0)
-            split_ratio = historical_stats.get("ai_split_count", 0) / max(historical_stats.get("fragment_count", 1), 1)
+            if avg_fragment_count > 0:
+                split_ratio = historical_stats.get("ai_split_count", 0) / max(avg_fragment_count, 1)
+            else:
+                split_ratio = 0
 
             if avg_fragment_count:
                 debug(f"历史分割统计: 平均片段数={avg_fragment_count}, 平均时长={avg_duration:.1f}s, AI分割比例={split_ratio:.0%}")
@@ -134,7 +137,6 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
         historical_issues = self.current_historical_context.get("historical_issues")
         if historical_issues:
             debug(f"历史问题数量: {len(historical_issues)}条，将参考避免这些问题")
-
 
     def video_process(self, shot_sequence: ShotSequence, parsed_script: ParsedScript) -> Optional[FragmentSequence]:
         """视频片段分割"""
@@ -207,14 +209,10 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
         issues = []
 
         if not fragment_sequence or not fragment_sequence.fragments:
-            issues.append(BasicViolation(
-                rule_code=RuleType.FRAGMENT_MISSING.code,
-                rule_name=RuleType.FRAGMENT_MISSING.description,
-                issue_type=IssueType.FRAGMENT,
-                source_node=PipelineNode.SPLIT_VIDEO,
-                description="未能生成任何视频片段",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.FRAGMENT_MISSING,
                 severity=SeverityLevel.ERROR,
-                fragment_id=None,
+                source_node=PipelineNode.SPLIT_VIDEO,
                 suggestion="请检查镜头分割结果是否正确"
             ))
             return issues
@@ -224,14 +222,12 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
         # 1. 检查片段数量合理性
         expected_min_fragments = max(1, len(shot_sequence.shots))
         if len(fragments) < expected_min_fragments * 0.5:
-            issues.append(BasicViolation(
-                rule_code=RuleType.FRAGMENT_INSUFFICIENT.code,
-                rule_name=RuleType.FRAGMENT_INSUFFICIENT.description,
-                issue_type=IssueType.FRAGMENT,
-                source_node=PipelineNode.SPLIT_VIDEO,
-                description=f"片段数量不足: {len(fragments)}个，预期至少{expected_min_fragments}个",
+            issues.append(BasicViolation.create_violation(
+                rule_type=RuleType.FRAGMENT_INSUFFICIENT,
+                issue_value=len(fragments),
+                standard_value=expected_min_fragments,
                 severity=SeverityLevel.MODERATE,
-                fragment_id=None,
+                source_node=PipelineNode.SPLIT_VIDEO,
                 suggestion="每个镜头应至少生成1个片段"
             ))
 
@@ -239,40 +235,38 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
         for fragment in fragments:
             # 时长过短
             if fragment.duration < self.config.min_fragment_duration:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.FRAGMENT_DURATION_TOO_SHORT.code,
-                    rule_name=RuleType.FRAGMENT_DURATION_TOO_SHORT.description,
-                    issue_type=IssueType.DURATION,
-                    source_node=PipelineNode.SPLIT_VIDEO,
-                    description=f"片段{fragment.id}时长过短: {fragment.duration}秒",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.FRAGMENT_DURATION_TOO_SHORT,
+                    issue_value=fragment.duration,
+                    standard_value=self.config.min_fragment_duration,
                     severity=SeverityLevel.MAJOR,
                     fragment_id=fragment.id,
+                    source_node=PipelineNode.SPLIT_VIDEO,
                     suggestion=f"片段时长应至少{self.config.min_fragment_duration}秒"
                 ))
             # 时长过长
             elif fragment.duration > self.config.duration_split_threshold:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.FRAGMENT_DURATION_TOO_LONG.code,
-                    rule_name=RuleType.FRAGMENT_DURATION_TOO_LONG.description,
-                    issue_type=IssueType.DURATION,
-                    source_node=PipelineNode.SPLIT_VIDEO,
-                    description=f"片段{fragment.id}时长过长: {fragment.duration}秒",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.FRAGMENT_DURATION_TOO_LONG,
+                    issue_value=fragment.duration,
+                    standard_value=self.config.duration_split_threshold,
                     severity=SeverityLevel.WARNING,
                     fragment_id=fragment.id,
+                    source_node=PipelineNode.SPLIT_VIDEO,
                     suggestion=f"片段时长应控制在{self.config.duration_split_threshold}秒以内"
                 ))
 
         # 3. 检查片段描述
         for fragment in fragments:
             if not fragment.description or len(fragment.description.strip()) < 5:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.FRAGMENT_DESCRIPTION_MISSING.code,
-                    rule_name=RuleType.FRAGMENT_DESCRIPTION_MISSING.description,
-                    issue_type=IssueType.PROMPT,
-                    source_node=PipelineNode.SPLIT_VIDEO,
-                    description=f"片段{fragment.id}描述过短或缺失",
+                desc_len = len(fragment.description.strip()) if fragment.description else 0
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.FRAGMENT_DESCRIPTION_MISSING,
+                    issue_value=desc_len,
+                    standard_value=5,
                     severity=SeverityLevel.MODERATE,
                     fragment_id=fragment.id,
+                    source_node=PipelineNode.SPLIT_VIDEO,
                     suggestion="为片段添加描述性内容"
                 ))
 
@@ -283,16 +277,15 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
 
             # 检查时间连续性
             expected_next_start = curr.start_time + curr.duration
-            if abs(next_frag.start_time - expected_next_start) > 0.1:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.FRAGMENT_TIME_GAP.code,
-                    rule_name=RuleType.FRAGMENT_TIME_GAP.description,
-                    issue_type=IssueType.CONTINUITY,
-                    source_node=PipelineNode.SPLIT_VIDEO,
-                    description=f"片段{curr.id}和{next_frag.id}之间存在时间间隔: "
-                                f"预期{expected_next_start}s，实际{next_frag.start_time}s",
+            time_gap = abs(next_frag.start_time - expected_next_start)
+            if time_gap > 0.1:
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.FRAGMENT_TIME_GAP,
+                    issue_value=next_frag.start_time,
+                    standard_value=expected_next_start,
                     severity=SeverityLevel.MAJOR,
                     fragment_id=curr.id,
+                    source_node=PipelineNode.SPLIT_VIDEO,
                     suggestion="修复时间连续性，确保片段首尾相接"
                 ))
 
@@ -304,28 +297,24 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
             curr_end = curr.start_time + curr.duration
             if next_frag.start_time < curr_end - 0.1:  # 允许微小误差
                 overlap = curr_end - next_frag.start_time
-                issues.append(BasicViolation(
-                    rule_code=RuleType.FRAGMENT_OVERLAP.code,
-                    rule_name=RuleType.FRAGMENT_OVERLAP.description,
-                    issue_type=IssueType.CONTINUITY,
-                    source_node=PipelineNode.SPLIT_VIDEO,
-                    description=f"片段{curr.id}和{next_frag.id}存在重叠: {overlap:.2f}秒",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.FRAGMENT_OVERLAP,
+                    issue_value=round(overlap, 2),
+                    standard_value=0,
                     severity=SeverityLevel.ERROR,
                     fragment_id=curr.id,
+                    source_node=PipelineNode.SPLIT_VIDEO,
                     suggestion="调整片段时间，避免重叠"
                 ))
 
         # 6. 检查元素引用
         for fragment in fragments:
             if not fragment.element_ids:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.FRAGMENT_NO_ELEMENTS.code,
-                    rule_name=RuleType.FRAGMENT_NO_ELEMENTS.description,
-                    issue_type=IssueType.FRAGMENT,
-                    source_node=PipelineNode.SPLIT_VIDEO,
-                    description=f"片段{fragment.id}没有关联任何剧本元素",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.FRAGMENT_NO_ELEMENTS,
                     severity=SeverityLevel.WARNING,
                     fragment_id=fragment.id,
+                    source_node=PipelineNode.SPLIT_VIDEO,
                     suggestion="为片段关联对应的剧本元素"
                 ))
 
@@ -333,14 +322,11 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
         for fragment in fragments:
             continuity_notes = getattr(fragment, 'continuity_notes', {})
             if not continuity_notes:
-                issues.append(BasicViolation(
-                    rule_code=RuleType.FRAGMENT_NO_CONTINUITY.code,
-                    rule_name=RuleType.FRAGMENT_NO_CONTINUITY.description,
-                    issue_type=IssueType.CONTINUITY,
-                    source_node=PipelineNode.SPLIT_VIDEO,
-                    description=f"片段{fragment.id}缺少连续性注释",
+                issues.append(BasicViolation.create_violation(
+                    rule_type=RuleType.FRAGMENT_NO_CONTINUITY,
                     severity=SeverityLevel.WARNING,
                     fragment_id=fragment.id,
+                    source_node=PipelineNode.SPLIT_VIDEO,
                     suggestion="添加连续性注释，包括角色、场景等信息"
                 ))
 
@@ -371,13 +357,15 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
 
         repair_actions = []
 
-        # 问题分类
-        duration_issues = [i for i in issues if 'duration' in i.rule_code]
-        description_issues = [i for i in issues if 'description' in i.rule_code]
-        time_gap_issues = [i for i in issues if 'time_gap' in i.rule_code]
-        overlap_issues = [i for i in issues if 'overlap' in i.rule_code]
-        element_issues = [i for i in issues if 'no_elements' in i.rule_code]
-        continuity_issues = [i for i in issues if 'no_continuity' in i.rule_code]
+        # 问题分类 - 使用 issue_type 进行主分类，更精确和类型安全
+        duration_issues = [i for i in issues if i.issue_type == IssueType.DURATION]
+        description_issues = [i for i in issues if i.issue_type == IssueType.PROMPT and
+                             ('description' in (i.issue_code or '') or 'desc' in (i.issue_code or ''))]
+        time_gap_issues = [i for i in issues if i.issue_code in ['fragment_time_gap', 'time_gap']]
+        overlap_issues = [i for i in issues if i.issue_code in ['fragment_overlap', 'time_overlap']]
+        element_issues = [i for i in issues if i.issue_code in ['fragment_no_elements', 'fragment_element_mismatch']]
+        continuity_issues = [i for i in issues if i.issue_type == IssueType.CONTINUITY and
+                            i.issue_code in ['fragment_no_continuity', 'fragment_continuity_broken']]
 
         fragments = list(fragment_sequence.fragments)
 
@@ -392,11 +380,11 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
                 if not fragment:
                     continue
 
-                if '过短' in issue.description:
+                if '过短' in issue.issue_desc:
                     old_duration = fragment.duration
                     fragment.duration = self.config.min_fragment_duration
                     repair_actions.append(f"调整过短时长: {fragment_id} {old_duration}s -> {self.config.min_fragment_duration}s")
-                elif '过长' in issue.description:
+                elif '过长' in issue.issue_desc:
                     old_duration = fragment.duration
                     fragment.duration = self.config.duration_split_threshold
                     repair_actions.append(f"调整过长时长: {fragment_id} {old_duration}s -> {self.config.duration_split_threshold}s")
@@ -425,25 +413,25 @@ class VideoSplitterAgent(BaseRepairableAgent[FragmentSequence, ShotSequence]):
                     fragment.description = f"视频片段，时长{fragment.duration}秒"
                     repair_actions.append(f"生成默认描述: {fragment_id}")
 
-        # ========== 3. 修复时间间隔问题 ==========
-        if time_gap_issues:
-            # 重新计算时间，确保连续性
+        # ========== 3. 修复时间间隔和重叠问题 ==========
+        if time_gap_issues or overlap_issues:
+            # 重新计算时间，确保连续性并消除重叠
             current_time = 0.0
             for i, fragment in enumerate(fragments):
                 old_start = fragment.start_time
                 fragment.start_time = current_time
                 if abs(old_start - current_time) > 0.01:
-                    repair_actions.append(f"修复时间间隔: {fragment.id} {old_start}s -> {current_time}s")
+                    repair_actions.append(f"修复片段时间: {fragment.id} {old_start}s -> {current_time}s")
                 current_time += fragment.duration
 
-        # ========== 4. 修复重叠问题 ==========
-        if overlap_issues:
-            # 重新调整时间，消除重叠
-            current_time = 0.0
-            for fragment in fragments:
-                fragment.start_time = current_time
-                current_time += fragment.duration
-            repair_actions.append("重新调整所有片段时间，消除重叠")
+            # ========== 4. 修复重叠问题 ==========
+            if time_gap_issues and overlap_issues:
+                repair_actions.append("重新调整所有片段时间，消除间隔和重叠")
+            elif time_gap_issues:
+                repair_actions.append("重新调整片段时间，消除时间间隔")
+            elif overlap_issues:
+                repair_actions.append("重新调整片段时间，消除重叠")
+
 
         # ========== 5. 修复元素引用 ==========
         if element_issues:

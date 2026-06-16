@@ -480,7 +480,7 @@ def example_workflow():
    instructions = result["data"]["instructions"]
    for fragment in instructions["fragments"]:
        print(f"片段 {fragment['fragment_id']}: {fragment['prompt'][:100]}...")
-       print(f"音频: {fragment.get('audio_prompt', {}).get('prompt', '无')[:100]}...")
+       print(f"音频: {fragment.get('audio', {}).get('prompt', '无')[:100]}...")
    
 5. 监控队列
    queue = client.call_tool("get_queue_status", {})
